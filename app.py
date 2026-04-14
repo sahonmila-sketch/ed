@@ -7,7 +7,8 @@ app = Flask(__name__, static_folder='.', static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}}) # Enable CORS for all API routes
 
 # Data persistence
-DB_FILE = 'db_backend.json'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.path.join(BASE_DIR, 'db_backend.json')
 
 def get_db():
     if not os.path.exists(DB_FILE):
@@ -18,16 +19,20 @@ def get_db():
             if 'landing' not in db:
                 db['landing'] = {
                     "director_photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Director",
-                    "director_name": "Ism Familiya",
-                    "director_title": "Platforma Direktori",
-                    "best_teachers": [
-                        { "id": 1, "name": "Ustoz Anvar", "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Teacher1", "title": "Dasturlash ustozi", "date": "06.04.2026" },
-                        { "id": 2, "name": "Ustoz Barno", "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Teacher2", "title": "Grafik dizayn", "date": "05.04.2026" }
-                    ],
+                    "director_name": "Erko",
+                    "director_title": "Texnikum Rahbari",
+                    "telegram_link": "https://t.me/your_telegram",
+                    "instagram_link": "https://instagram.com/",
+                    "youtube_link": "https://youtube.com/",
                     "indicators": [
-                        { "id": 1, "label": "Professor va o'qituvchilar", "count": "198", "icon": "user" },
-                        { "id": 2, "label": "Talabalar", "count": "2654", "icon": "users" },
-                        { "id": 3, "label": "Bitiruvchilar", "count": "380", "icon": "graduation-cap" }
+                        { "id": 1, "label": "Professorlar", "count": "25+", "icon": "award" },
+                        { "id": 2, "label": "Talabalar", "count": "1,200+", "icon": "users" },
+                        { "id": 3, "label": "Muvaffaqiyatlar", "count": "50+", "icon": "star" }
+                    ],
+                    "best_teachers": [
+                        { "id": 1, "name": "Samat Jienbaev", "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Samat", "title": "Senior Mentor", "date": "06.04.2026" },
+                        { "id": 2, "name": "Gulnaz Turdimuratova", "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Gulnaz", "title": "Metodist", "date": "05.04.2026" },
+                        { "id": 3, "name": "Azamat Berdimuratov", "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Azamat", "title": "IT Specialist", "date": "06.04.2026" }
                     ]
                 }
                 save_db(db)
@@ -158,4 +163,5 @@ def sync_full_db():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lms-v20';
+const CACHE_NAME = 'lms-v21';
 const ASSETS = [
     '/',
     '/index.html',

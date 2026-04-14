@@ -152,9 +152,12 @@
                 "title": "Grafik dizayn"
             }
         ],
-        "director_name": "Ism Familiya",
+        "director_name": "Erko",
         "director_photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Director",
-        "director_title": "Platforma Direktori",
+        "director_title": "Texnikum Rahbari",
+        "telegram_link": "https://t.me/your_telegram",
+        "instagram_link": "https://instagram.com/",
+        "youtube_link": "https://youtube.com/",
         "indicators": [
             {
                 "count": "198",

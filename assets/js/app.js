@@ -35,20 +35,9 @@ const syncLandingData = async () => {
     } catch (e) { console.warn("Landing sync failed", e); }
 };
 
-window.saveLandingData = async (data) => {
-    try {
-        const res = await fetch(`${API_BASE}/landing`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        if (res.ok) {
-            LANDING_DATA = await res.json();
-            showToast("Landing yangilandi!");
-            if (STATE.view === 'home') renderView('home');
-        }
-    } catch (e) { showToast("Xatolik!", "error"); }
-};
+// Landing sync logic moved to end or kept uniquely here.
+// I will keep the one at the end and remove this one to avoid duplication.
+
 
 const v_home = () => {
     if (STATE.user) return "";
@@ -283,19 +272,51 @@ window.oLandingEdit = () => {
 };
 
 window.saveLandingChanges = () => {
+    console.log("Saving landing changes...");
     try {
-        const teachers = JSON.parse(document.getElementById('edit-teachers').value);
-        const indicators = JSON.parse(document.getElementById('edit-indicators').value);
+        const teachersRaw = document.getElementById('edit-teachers').value;
+        const indicatorsRaw = document.getElementById('edit-indicators').value;
+        
+        let teachers, indicators;
+        try {
+            teachers = JSON.parse(teachersRaw);
+        } catch (e) {
+            alert("Ustozlar ro'yxatida JSON xatosi bor!");
+            return;
+        }
+        try {
+            indicators = JSON.parse(indicatorsRaw);
+        } catch (e) {
+            alert("Ko'rsatkichlar ro'yxatida JSON xatosi bor!");
+            return;
+        }
+
         const data = {
             ...LANDING_DATA,
             director_name: document.getElementById('edit-d-name').value,
             director_photo: document.getElementById('edit-d-photo').value,
+            director_title: document.getElementById('edit-d-title').value,
+            telegram_link: document.getElementById('edit-tg').value,
+            instagram_link: document.getElementById('edit-insta').value,
+            youtube_link: document.getElementById('edit-yt').value,
             best_teachers: teachers,
             indicators: indicators
         };
-        saveLandingData(data);
+        console.log("Data to save:", data);
+        
+        // Update both the specific landing variable and the main DB
+        LANDING_DATA = data;
+        let db = getDB();
+        db.landing = data;
+        saveDB(db); // This will sync everything to the server
+        
+        showToast("Landing sahifasi yangilandi!");
+        if (STATE.view === 'home') renderView('home');
         document.getElementById('modal-root').classList.add('hidden');
-    } catch (e) { alert("JSON xato!"); }
+    } catch (e) { 
+        console.error("Save landing error:", e);
+        alert("Saqlashda kutilmagan xato yuz berdi!"); 
+    }
 };
 
 
@@ -350,6 +371,7 @@ const DEFAULT_DB = {
         { id: 2, groupId: 1, date: '2026-03-21', records: { 1: 'absent' } }
     ],
     tournaments: [],
+    landing: INITIAL_LANDING,
     chatMessages: [
         { id: 1, groupId: 1, userId: 2, userName: 'Ustoz Anvar', text: 'Assalomu alaykum, darsga tayyormisizlar?', time: '10:00', type: 'text' },
         { id: 2, groupId: 1, userId: 1, userName: 'Ali Valiyev', text: 'Va alaykum assalom, ha ustoz!', time: '10:05', type: 'text' }
@@ -514,11 +536,12 @@ const syncBackend = async () => {
                         }
                     }
                     localStorage.setItem('lms_db', newDbString);
+                    if (serverDb.landing) LANDING_DATA = serverDb.landing;
                     
                     const activeTag = document.activeElement ? document.activeElement.tagName : '';
                     const isTyping = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
                     
-                    if (!isTyping && ['posts', 'courses', 'course-detail', 'schedule', 'student-dashboard', 'ustoz-dashboard', 'admin-dashboard', 'chat'].includes(STATE.view)) {
+                    if (!isTyping && ['posts', 'courses', 'course-detail', 'schedule', 'student-dashboard', 'ustoz-dashboard', 'admin-dashboard', 'chat', 'home'].includes(STATE.view)) {
                         renderView(STATE.view);
                     }
                 }
@@ -570,7 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initial sync with backend
     syncBackend(); syncLandingData();
-    setInterval(() => { syncBackend(); syncLandingData(); }, 10000); // Background Sync for multi-user real-time feel
+    setInterval(() => { syncBackend(); syncLandingData(); }, 5000); // 5s for better real-time feel
 });
 
 
@@ -1438,7 +1461,6 @@ window.apprPost = async (id, st) => {
     showToast('Natija saqlandi');
     renderView('admin-dashboard');
     syncBackend(); syncLandingData();
-    setInterval(() => { syncBackend(); syncLandingData(); }, 30000); // Background Sync for multi-user real-time feel
 }
 window.toggleSetting = (key) => { let db = getDB(); db.settings[key] = !db.settings[key]; saveDB(db); renderView('tech_admin-dashboard'); }
 window.saveSettings = () => { let db = getDB(); db.settings.platformName = document.getElementById('sys-name').value; saveDB(db); showToast('Xizmat sozlamalari saqlandi'); }
