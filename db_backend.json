@@ -114,14 +114,7 @@
         {
             "id": 1,
             "name": "D 02 25",
-            "schedule": [
-                {
-                    "dayIndex": 0,
-                    "id": 1776083378962,
-                    "subject": "matem",
-                    "time": "Matem"
-                }
-            ],
+            "schedule": [],
             "studentIds": [
                 1
             ],
@@ -140,107 +133,67 @@
             {
                 "date": "06.04.2026",
                 "id": 1,
-                "name": "Ustoz Anvar",
-                "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Teacher1",
-                "title": "Dasturlash ustozi"
+                "name": "Samat Jienbaev",
+                "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Samat",
+                "title": "Senior Mentor"
             },
             {
                 "date": "05.04.2026",
                 "id": 2,
-                "name": "Ustoz Barno",
-                "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Teacher2",
-                "title": "Grafik dizayn"
+                "name": "Gulnaz Turdimuratova",
+                "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Gulnaz",
+                "title": "Metodist"
+            },
+            {
+                "date": "06.04.2026",
+                "id": 3,
+                "name": "Azamat Berdimuratov",
+                "photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Azamat",
+                "title": "IT Specialist"
             }
         ],
         "director_name": "Erko",
-        "director_photo": "https://api.dicebear.com/7.x/avataaars/svg?seed=Director",
+        "director_photo": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQwwz5HpQmffG_Lq0QO6FtRIUxnWg7U8X9pNA&s",
         "director_title": "Texnikum Rahbari",
-        "telegram_link": "https://t.me/your_telegram",
-        "instagram_link": "https://instagram.com/",
-        "youtube_link": "https://youtube.com/",
         "indicators": [
             {
-                "count": "198",
-                "icon": "user",
+                "count": "25+",
+                "icon": "award",
                 "id": 1,
-                "label": "Professor va o'qituvchilar"
+                "label": "Professorlar"
             },
             {
-                "count": "2654",
+                "count": "1,200+",
                 "icon": "users",
                 "id": 2,
                 "label": "Talabalar"
             },
             {
-                "count": "380",
-                "icon": "graduation-cap",
+                "count": "50+",
+                "icon": "star",
                 "id": 3,
-                "label": "Bitiruvchilar"
+                "label": "Muvaffaqiyatlar"
             }
-        ]
+        ],
+        "instagram_link": "https://instagram.com/",
+        "telegram_link": "https://t.me/your_telegram",
+        "youtube_link": "https://youtube.com/"
     },
+    "lastUpdate": 1784561692.3126655,
     "notifications": [
         {
-            "date": "2026 M04 13",
-            "id": 1776083084435.0283,
-            "msg": "Yangi foydalanuvchi tizimga kirdi: Ustoz Anvar (ustoz)",
-            "seen": true,
-            "type": "info",
-            "userId": "admin_broadcast"
-        },
-        {
-            "date": "2026 M04 13",
-            "id": 1776083824850.3613,
-            "msg": "Yangi foydalanuvchi tizimga kirdi: Ali Valiyev (student)",
-            "seen": true,
-            "type": "info",
-            "userId": "admin_broadcast"
-        },
-        {
-            "date": "2026 M04 13",
-            "id": 1776084174698.7131,
-            "msg": "Yangi foydalanuvchi tizimga kirdi: Asosiy Admin (admin)",
-            "seen": true,
-            "type": "info",
-            "userId": "admin_broadcast"
-        },
-        {
-            "date": "2026 M04 13",
-            "id": 1776084717138.5679,
-            "msg": "Yangi foydalanuvchi tizimga kirdi: Ustoz Anvar (ustoz)",
-            "seen": true,
-            "type": "info",
-            "userId": "admin_broadcast"
-        },
-        {
-            "date": "2026 M04 14",
-            "id": 1776177791903.328,
-            "msg": "Yangi foydalanuvchi tizimga kirdi: Asosiy Admin (admin)",
-            "seen": true,
-            "type": "info",
-            "userId": "admin_broadcast"
-        },
-        {
-            "date": "2026 M04 14",
-            "id": 1776177829565.517,
-            "msg": "Yangi foydalanuvchi tizimga kirdi: Ustoz Anvar (ustoz)",
-            "seen": true,
-            "type": "info",
-            "userId": "admin_broadcast"
-        },
-        {
-            "date": "2026 M04 14",
-            "id": 1776177873485.3933,
+            "date": "2026 M07 19",
+            "id": 1784403367263.2017,
             "msg": "Yangi foydalanuvchi tizimga kirdi: Ali Valiyev (student)",
             "seen": false,
             "type": "info",
             "userId": "admin_broadcast"
         },
         {
-            "id": 1776178063097.7046,
+            "id": 1784561692283.4482,
             "userId": "admin_broadcast",
             "msg": "Yangi foydalanuvchi tizimga kirdi: Asosiy Admin (admin)",
-            "date": "2026 M04 14",
+            "date": "2026 M07 20",
             "type": "info",
             "seen": false
         }
@@ -250,44 +203,9 @@
             "approved": true,
             "authorId": 2,
             "id": 1,
-            "liked_users": [
-                2,
-                1
-            ],
-            "likes": 26,
-            "text": "Xush kelibsiz"
-        },
-        {
-            "approved": true,
-            "author": "Asosiy Admin",
-            "authorId": 3,
-            "comments": [],
-            "content": "ol mugalim",
-            "createdAt": "2026-04-13T12:43:50.467Z",
-            "date": "2026 M04 13",
-            "id": 1776084230467,
-            "image": null,
-            "liked_users": [
-                2,
-                1
-            ],
-            "likes": 2,
-            "status": "approved",
-            "title": "S.Saburov middle  bacend dev"
-        },
-        {
-            "approved": true,
-            "author": "Asosiy Admin",
-            "authorId": 3,
-            "content": "ol mugalim",
-            "createdAt": "2026-04-13T12:43:50.467Z",
-            "date": "2026 M04 13",
-            "id": 1776084230467,
-            "image": null,
             "liked_users": [],
-            "likes": 0,
-            "status": "approved",
-            "title": "S.Saburov middle  bacend dev"
+            "likes": 24,
+            "text": "Xush kelibsiz"
         }
     ],
     "questions": [
