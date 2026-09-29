@@ -23,8 +23,8 @@ async function fetchMe() {
 
 function logout() {
     setAuth(null, null);
-    document.getElementById('mobile-bottom-nav').classList.add('hidden');
-    document.getElementById('mobile-header').classList.add('hidden');
+    document.getElementById('mobile-bottom-nav')?.classList.add('hidden');
+    document.getElementById('mobile-header')?.classList.add('hidden');
     window.location.hash = 'login';
 }
 
