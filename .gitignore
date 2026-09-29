@@ -9,5 +9,14 @@ env/
 idea
 .idea
 .idea/
+
+# Python artefaktlari
+__pycache__/
+*.py[cod]
+
+# Ish vaqtidagi fayllar (DB va loglar — lokal holatga bog'liq)
+*.log
+lms.db
+lms-backup-seed.db
 .idea/
 

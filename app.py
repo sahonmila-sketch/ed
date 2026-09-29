@@ -27,23 +27,48 @@ db.init_app(app)
 
 # ─── Role-based access decorator ─────────────────────────────────
 def role_required(*roles):
+    """Rolni JSTM'dan emas, joriy bazadan olamiz — aks holda rol o'zgarganda
+    eskirgan token 7 kun davomida eski huquqlar bilan ishlayveradi."""
     def wrapper(fn):
         @wraps(fn)
         @jwt_required()
         def decorated(*args, **kwargs):
-            claims = get_jwt()
-            if claims.get('role') not in roles:
+            user = get_current_user()
+            if not user:
+                return jsonify({"error": "Foydalanuvchi topilmadi"}), 401
+            if user.role not in roles:
                 return jsonify({"error": "Ruxsat yo'q"}), 403
             return fn(*args, **kwargs)
         return decorated
     return wrapper
 
+# Rol bo'yicha umumiy to'plamlar
+STAFF_ROLES = ('admin', 'tech_admin', 'director', 'ustoz')
+
 # ─── Helpers ─────────────────────────────────────────────────────
 XP_LIMITS = {'lessons': 50, 'duels': 100, 'miniGame': 30, 'other': 20}
 
 def get_current_user():
-    uid = get_jwt_identity()
-    return User.query.get(uid)
+    return db.session.get(User, get_jwt_identity())
+
+def user_can_manage_students(user):
+    """Guruhni boshqarish huquqi: admin/tex_admin/director — hammasi,
+    ustoz — faqat o'z guruhlari."""
+    if user.role in ('admin', 'tech_admin', 'director'):
+        return True
+    if user.role == 'ustoz':
+        ids = db.session.query(Group.id).filter(Group.ustoz_id == user.id).all()
+        return [r[0] for r in ids]
+    return False
+
+def user_group_ids(user):
+    if user.role in ('admin', 'tech_admin', 'director'):
+        return [g.id for g in Group.query.all()]
+    if user.role == 'ustoz':
+        return [g.id for g in Group.query.filter_by(ustoz_id=user.id).all()]
+    if user.group_id:
+        return [user.group_id]
+    return []
 
 def add_xp(user, amount, category='other'):
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -71,12 +96,13 @@ def check_achievements(user):
     lesson_count = sum(1 for c in progress.values() if isinstance(c, dict) for _ in c.get('completed', []))
     new_achievements = []
 
+    # Shartlar 'achievements' jadvalidagi matnlar bilan mos kelishi shart
     checks = {
-        'first_lesson': lambda: lesson_count >= 1,
-        'active_5': lambda: lesson_count >= 15,
-        'top_points': lambda: (user.xp or 0) >= 5000,
-        'legend': lambda: (user.xp or 0) >= 15000,
-        'attendance_7': lambda: (user.duel_wins or 0) >= 50
+        'first_lesson': lambda: lesson_count >= 1,       # "Birinchi darsni yakunladingiz"
+        'active_5': lambda: lesson_count >= 5,          # "5 ta darsni yakunladingiz"
+        'top_points': lambda: (user.xp or 0) >= 5000,   # "Yuqori natija va ko'p ballar"
+        'legend': lambda: (user.xp or 0) >= 15000,      # "Platformadagi eng yuqori daraja"
+        'attendance_7': lambda: count_present_days(user) >= 7,  # "7 kunlik mukammal davomat"
     }
 
     for ach_id, check_fn in checks.items():
@@ -90,18 +116,30 @@ def check_achievements(user):
 
     return new_achievements
 
+def count_present_days(user):
+    """Talabaning kelgan (present) kunlari soni."""
+    if not user.group_id:
+        return 0
+    days = 0
+    for r in Attendance.query.filter_by(group_id=user.group_id).all():
+        if json.loads(r.records or '{}').get(str(user.id)) == 'present':
+            days += 1
+    return days
+
 # ─── Init DB & Seed ──────────────────────────────────────────────
 def seed_data():
     if User.query.first():
         return
 
+    # Parol minimal uzunligi (6 belgi) boshqa endpointlarda tekshiriladi —
+    # shuning uchun demo-parollar ham shu qoidaga mos keladi.
     users_data = [
-        (1, 'Ali Valiyev', 'talaba@lms.uz', '123', 'student', 1250, 1, ['first_lesson']),
-        (2, 'Ustoz Anvar', 'ustoz@lms.uz', '123', 'ustoz', 0, 1, []),
-        (3, 'Asosiy Admin', 'admin@lms.uz', '123', 'admin', 0, None, []),
-        (4, 'Tech Admin', 'tech@lms.uz', '123', 'tech_admin', 0, None, []),
-        (5, 'Director Xon', 'director@lms.uz', '123', 'director', 0, None, []),
-        (6, 'Valiyeva Ona', 'parent@lms.uz', '123', 'parent', 0, None, []),
+        (1, 'Ali Valiyev', 'talaba@lms.uz', '123456', 'student', 1250, 1, ['first_lesson']),
+        (2, 'Ustoz Anvar', 'ustoz@lms.uz', '123456', 'ustoz', 0, 1, []),
+        (3, 'Asosiy Admin', 'admin@lms.uz', '123456', 'admin', 0, None, []),
+        (4, 'Tech Admin', 'tech@lms.uz', '123456', 'tech_admin', 0, None, []),
+        (5, 'Director Xon', 'director@lms.uz', '123456', 'director', 0, None, []),
+        (6, 'Valiyeva Ona', 'parent@lms.uz', '123456', 'parent', 0, None, []),
     ]
     for uid, name, email, pw, role, xp, gid, achs in users_data:
         u = User(id=uid, full_name=name, email=email, role=role, xp=xp, group_id=gid,
@@ -125,14 +163,20 @@ def seed_data():
                content='Dasturlash nima?', video_url='https://www.youtube.com/watch?v=dQw4w9WgXcQ', order=1)
     db.session.add(l)
 
+    # Yutuqlar — справочник: обновляем, если уже есть (идемпотентно)
     for ach in [
         ('first_lesson', 'Boshlovchi', '🌱', 'common', 'Birinchi darsni yakunladingiz'),
         ('active_5', 'Faol talaba', '🔥', 'rare', '5 ta darsni muvaffaqiyatli yakunladingiz'),
         ('attendance_7', 'Intizomli', '📅', 'epic', '7 kunlik mukammal davomat'),
-        ('top_points', 'Top student', '👑', 'epic', 'Yuqori natija va ko\'p ballar'),
+        ('top_points', 'Top student', '👑', 'epic', 'Yuqori natija va ko‘p ballar'),
         ('legend', 'Afsona', '💎', 'legendary', 'Platformadagi eng yuqori daraja'),
     ]:
-        db.session.add(Achievement(id=ach[0], title=ach[1], icon=ach[2], rarity=ach[3], desc=ach[4]))
+        row = db.session.get(Achievement, ach[0])
+        if row:
+            row.title, row.icon, row.rarity, row.desc = ach[1], ach[2], ach[3], ach[4]
+        else:
+            db.session.add(Achievement(id=ach[0], title=ach[1], icon=ach[2],
+                                      rarity=ach[3], desc=ach[4]))
 
     p = Post(id=1, user_id=2, title='Xush kelibsiz', content='Platformaga xush kelibsiz!',
              approved=True, status='approved', author_name='Ustoz Anvar', date=datetime.now(timezone.utc).strftime('%d.%m.%Y'),
@@ -221,9 +265,18 @@ def get_college_location():
     lat = Setting.get('college_lat')
     lng = Setting.get('college_lng')
     radius = Setting.get('attendance_radius', '200')
+    # Sozlamalar qo'lda tahrirlangan bo'lishi mumkin — noto'g'ri qiymat
+    # butun endpointni 500 qilmasligi kerak.
+    try:
+        radius = float(radius)
+    except (TypeError, ValueError):
+        radius = 200.0
     if lat and lng:
-        return float(lat), float(lng), float(radius)
-    return None, None, 200
+        try:
+            return float(lat), float(lng), radius
+        except (TypeError, ValueError):
+            pass
+    return None, None, 200.0
 
 # ─── Telegram notification helper ────────────────────────────
 import urllib.request, urllib.error
@@ -263,11 +316,24 @@ def static_files(path):
 # ══════════════════════════════════════════════════════════════════
 #  AUTH
 # ══════════════════════════════════════════════════════════════════
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$')
+
+# Rolni o'zi tanlay olmasin — anonim ro'yxatdan o'tishda har doim talaba.
+PUBLIC_REGISTER_ROLES = ('student',)
+
+
+def norm_email(value):
+    """Emailni kichik harfga tushiradi va bo'sh joylarni olib tashlaydi —
+    aks holda `Ali@` va `ali@` turli hisoblar bo'lib qolardi."""
+    return (value or '').strip().lower()
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
-    data = request.json
-    user = User.query.filter_by(email=data.get('email')).first()
-    if not user or not user.check_password(data.get('password', '')):
+    data = request.json or {}
+    email = norm_email(data.get('email'))
+    user = User.query.filter_by(email=email).first() if email else None
+    if not user or not user.check_password(data.get('password') or ''):
         return jsonify({"error": "Email yoki parol xato"}), 401
 
     access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
@@ -275,31 +341,40 @@ def auth_login():
 
 @app.route('/api/auth/register', methods=['POST'])
 def auth_register():
-    data = request.json
-    if User.query.filter_by(email=data.get('email')).first():
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    email = norm_email(data.get('email'))
+    password = data.get('password') or ''
+
+    if not name or not email:
+        return jsonify({"error": "Ism va email to'ldirilishi shart"}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "Email noto'g'ri shaklda"}), 400
+    if len(password) < 6:
+        return jsonify({"error": "Parol kamida 6 belgi bo'lishi kerak"}), 400
+    if User.query.filter_by(email=email).first():
         return jsonify({"error": "Bu email allaqachon ro'yxatdan o'tilgan"}), 409
+    if Setting.get('allowRegistration', 'true') != 'true':
+        return jsonify({"error": "Hozircha ro'yxatdan o'tish yopilgan"}), 403
 
-    group_id = data.get('groupId')
-    if group_id:
-        group = Group.query.get(int(group_id))
-        if group:
-            ids = json.loads(group.student_ids)
-            ids.append(int(time.time() * 1000))
+    group = None
+    if data.get('groupId'):
+        group = db.session.get(Group, int(data['groupId']))
 
-    user = User(full_name=data['name'], email=data['email'], role='student', xp=0)
-    user.set_password(data['password'])
+    user = User(full_name=name, email=email, role='student', xp=0,
+                group_id=group.id if group else None)
+    user.set_password(password)
     db.session.add(user)
     db.session.flush()
 
-    if group_id:
-        group = Group.query.get(int(group_id))
-        if group:
-            ids = json.loads(group.student_ids)
+    if group:
+        ids = json.loads(group.student_ids or '[]')
+        if user.id not in ids:
             ids.append(user.id)
-            group.student_ids = json.dumps(ids)
+        group.student_ids = json.dumps(ids)
 
     db.session.commit()
-    access_token = create_access_token(identity=str(user.id), additional_claims={'role': 'student'})
+    access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
     return jsonify({"token": access_token, "user": user.to_dict()}), 201
 
 @app.route('/api/auth/me', methods=['GET', 'POST'])
@@ -314,15 +389,91 @@ def auth_me():
 #  USERS
 # ══════════════════════════════════════════════════════════════════
 @app.route('/api/users', methods=['GET'])
-@role_required('admin', 'tech_admin')
+@role_required('admin', 'tech_admin', 'director', 'ustoz')
 def get_users():
-    users = User.query.all()
+    """Ustoz faqat o'z guruh talabalarini ko'radi, direktor hisobot uchun
+    o'qituvchilarni ham ko'radi. Parol hech qachon qaytarilmaydi."""
+    current = get_current_user()
+    q = User.query
+
+    if current.role == 'ustoz':
+        gids = user_group_ids(current)
+        visible = set()
+        for gid in gids:
+            g = db.session.get(Group, gid)
+            if g:
+                visible.update(json.loads(g.student_ids or '[]'))
+        visible.add(current.id)
+        users = q.filter(User.id.in_(visible)).all() if visible else []
+    elif current.role == 'director':
+        users = q.filter(User.role.in_(('student', 'ustoz'))).all()
+    else:
+        users = q.all()
+
     return jsonify([u.to_dict() for u in users])
+
+@app.route('/api/users', methods=['POST'])
+@role_required('admin', 'tech_admin')
+def create_user():
+    data = request.json or {}
+    email = norm_email(data.get('email'))
+    if not email or not data.get('name'):
+        return jsonify({"error": "Ism va email to'ldirilishi shart"}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "Email noto'g'ri shaklda"}), 400
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "Bu email allaqachon ro'yxatdan o'tilgan"}), 409
+    if len(data.get('password') or '') < 6:
+        return jsonify({"error": "Parol kamida 6 belgi bo'lishi kerak"}), 400
+    role = data.get('role', 'student')
+    if role not in ('student', 'ustoz', 'parent', 'admin', 'tech_admin', 'director'):
+        return jsonify({"error": "Noma'lum rol"}), 400
+
+    group_id = data.get('groupId') or None
+    user = User(
+        full_name=data['name'], email=email,
+        role=role, xp=0, group_id=group_id
+    )
+    user.set_password(data.get('password'))
+    db.session.add(user)
+    db.session.flush()
+
+    if group_id:
+        group = db.session.get(Group, int(group_id))
+        if group:
+            ids = json.loads(group.student_ids or '[]')
+            if user.id not in ids:
+                ids.append(user.id)
+            group.student_ids = json.dumps(ids)
+
+    db.session.commit()
+    return jsonify(user.to_dict()), 201
+
+@app.route('/api/users/<int:uid>', methods=['DELETE'])
+@role_required('admin')
+def delete_user(uid):
+    current = get_current_user()
+    if uid == current.id:
+        return jsonify({"error": "O'z akkauntingizni o'chira olmaysiz"}), 400
+    user = db.session.get(User, uid)
+    if not user:
+        return jsonify({"error": "Foydalanuvchi topilmadi"}), 404
+
+    for g in Group.query.all():
+        ids = json.loads(g.student_ids or '[]')
+        if uid in ids:
+            g.student_ids = json.dumps([i for i in ids if i != uid])
+        if g.ustoz_id == uid:
+            g.ustoz_id = None
+    Notification.query.filter_by(user_id=uid).delete()
+    db.session.delete(user)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route('/api/users/<int:uid>', methods=['PATCH'])
 @jwt_required()
 def update_user(uid):
-    data = request.json
+    data = request.json or {}
     user = User.query.get(uid)
     if not user:
         return jsonify({"error": "Foydalanuvchi topilmadi"}), 404
@@ -331,13 +482,31 @@ def update_user(uid):
     if current.id != uid and current.role not in ('admin', 'tech_admin'):
         return jsonify({"error": "Ruxsat yo'q"}), 403
 
-    if 'role' in data and current.role in ('admin', 'tech_admin'):
+    if 'role' in data and current.role == 'admin':
+        if data['role'] not in ('student', 'ustoz', 'parent', 'admin', 'tech_admin', 'director'):
+            return jsonify({"error": "Noma'lum rol"}), 400
         user.role = data['role']
-    if 'full_name' in data:
-        user.full_name = data['full_name']
+    if 'groupId' in data and current.role in ('admin', 'tech_admin'):
+        old_gid, new_gid = user.group_id, data['groupId']
+        user.group_id = new_gid
+        for gid in (old_gid, new_gid):
+            if not gid:
+                continue
+            g = db.session.get(Group, gid)
+            if not g:
+                continue
+            ids = json.loads(g.student_ids or '[]')
+            ids = [i for i in ids if i != uid]
+            if gid == new_gid and user.role == 'student':
+                ids.append(uid)
+            g.student_ids = json.dumps(ids)
+    if 'full_name' in data and data['full_name'].strip():
+        user.full_name = data['full_name'].strip()
     if 'avatar' in data:
         user.avatar = data['avatar']
-    if 'password' in data:
+    if 'password' in data and data['password']:
+        if len(data['password']) < 6:
+            return jsonify({"error": "Parol kamida 6 belgi bo'lishi kerak"}), 400
         user.set_password(data['password'])
     if 'xp' in data and current.role in ('admin', 'tech_admin'):
         user.xp = data['xp']
@@ -346,6 +515,7 @@ def update_user(uid):
     return jsonify(user.to_dict())
 
 @app.route('/api/users/leaderboard', methods=['GET'])
+@jwt_required()
 def get_leaderboard():
     users = User.query.filter_by(role='student').order_by(User.xp.desc()).all()
     groups = Group.query.all()
@@ -366,7 +536,20 @@ def get_leaderboard():
 # ══════════════════════════════════════════════════════════════════
 @app.route('/api/posts', methods=['GET'])
 def get_posts():
-    posts = Post.query.order_by(Post.created_at.desc()).all()
+    # Tasdiqlanmagan postlarni faqat muallif va xodimlar ko'radi
+    try:
+        user = get_current_user()
+    except Exception:
+        user = None
+    if user and user.role in STAFF_ROLES:
+        posts = Post.query.order_by(Post.created_at.desc()).all()
+    else:
+        q = Post.query.filter_by(approved=True)
+        if user:
+            q = q.filter(db.or_(Post.approved == True, Post.user_id == user.id))
+        else:
+            q = q.filter_by(approved=True)
+        posts = q.order_by(Post.created_at.desc()).all()
     return jsonify([p.to_dict() for p in posts])
 
 @app.route('/api/posts', methods=['POST'])
@@ -387,26 +570,28 @@ def create_post():
     return jsonify(post.to_dict()), 201
 
 @app.route('/api/posts/<int:post_id>', methods=['PATCH'])
-@role_required('admin')
+@role_required('admin', 'tech_admin')
 def update_post(post_id):
-    post = Post.query.get(post_id)
+    post = db.session.get(Post, post_id)
     if not post:
         return jsonify({"error": "Post topilmadi"}), 404
-    data = request.json
+    data = request.json or {}
     if 'approved' in data:
-        post.approved = data['approved']
-        post.status = 'approved' if data['approved'] else 'rejected'
+        post.approved = bool(data['approved'])
+        post.status = 'approved' if post.approved else 'pending'
+    if 'title' in data: post.title = data['title']
+    if 'content' in data: post.content = data['content']
     db.session.commit()
     return jsonify(post.to_dict())
 
 @app.route('/api/posts/<int:post_id>', methods=['DELETE'])
 @jwt_required()
 def delete_post(post_id):
-    post = Post.query.get(post_id)
+    post = db.session.get(Post, post_id)
     if not post:
         return jsonify({"error": "Post topilmadi"}), 404
     user = get_current_user()
-    if post.user_id != user.id and user.role not in ('admin', 'ustoz'):
+    if post.user_id != user.id and user.role != 'admin':
         return jsonify({"error": "Ruxsat yo'q"}), 403
     db.session.delete(post)
     db.session.commit()
@@ -457,42 +642,77 @@ def get_courses():
     courses = Course.query.all()
     return jsonify([c.to_dict() for c in courses])
 
+def _apply_lessons(course, lessons_data):
+    """Kurs darslarini sinxronlaydi.
+
+    Eski darslarni o'chib yubormaymiz — aks holda har bir saqlashda
+    lesson id'lar o'zgaradi va talabalarning progressi yo'qoladi.
+    """
+    existing = {l.id: l for l in course.lessons.all()}
+    keep = []
+    for i, l in enumerate(lessons_data or []):
+        lid = l.get('id')
+        lesson = existing.get(lid) if lid else None
+        if lesson is None:
+            lesson = Lesson(course_id=course.id)
+            db.session.add(lesson)
+        lesson.title = l.get('title') or 'Untitled'
+        lesson.topic = l.get('topic') or ''
+        lesson.content = l.get('content') or ''
+        lesson.video_url = l.get('videoUrl') or None
+        lesson.order = i + 1
+        if l.get('duration'):
+            try:
+                lesson.duration_minutes = int(l['duration'])
+            except (TypeError, ValueError):
+                pass
+        keep.append(lesson)
+    for lid, lesson in existing.items():
+        if lesson not in keep:
+            db.session.delete(lesson)
+
+
 @app.route('/api/courses', methods=['POST'])
-@jwt_required()
+@role_required('ustoz', 'admin', 'tech_admin')
 def create_course():
     user = get_current_user()
-    data = request.json
+    data = request.json or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        return jsonify({"error": "Kurs nomi to'ldirilishi shart"}), 400
     course = Course(
-        title=data['title'], description=data.get('description', ''),
-        teacher_id=user.id, category=data.get('category', 'Dasturlash'),
+        title=title, description=data.get('description', ''),
+        teacher_id=data.get('teacherId') or user.id, category=data.get('category', 'Dasturlash'),
         status=data.get('status', 'Ochiq')
     )
     db.session.add(course)
+    if data.get('lessons'):
+        _apply_lessons(course, data['lessons'])
     db.session.commit()
     return jsonify(course.to_dict()), 201
 
 @app.route('/api/courses/<int:course_id>', methods=['PATCH'])
 @jwt_required()
 def update_course(course_id):
-    course = Course.query.get(course_id)
+    course = db.session.get(Course, course_id)
     if not course:
         return jsonify({"error": "Kurs topilmadi"}), 404
     user = get_current_user()
     if course.teacher_id != user.id and user.role not in ('admin', 'ustoz'):
         return jsonify({"error": "Ruxsat yo'q"}), 403
-    data = request.json
-    if 'title' in data: course.title = data['title']
-    if 'description' in data: course.description = data['description']
+    data = request.json or {}
+    if 'title' in data and data['title'].strip():
+        course.title = data['title'].strip()
+    if 'description' in data:
+        course.description = data['description']
+    if 'category' in data:
+        course.category = data['category']
+    if 'status' in data:
+        course.status = data['status']
+
     if 'lessons' in data:
-        for existing in course.lessons.all():
-            db.session.delete(existing)
-        for i, l in enumerate(data['lessons']):
-            lesson = Lesson(
-                course_id=course.id, title=l.get('title', ''),
-                topic=l.get('topic', ''), content=l.get('content', ''),
-                video_url=l.get('videoUrl'), order=i+1
-            )
-            db.session.add(lesson)
+        _apply_lessons(course, data['lessons'])
+
     db.session.commit()
     return jsonify(course.to_dict())
 
@@ -524,7 +744,7 @@ def start_lesson(lesson_id):
 @jwt_required()
 def complete_lesson(lesson_id):
     user = get_current_user()
-    lesson = Lesson.query.get(lesson_id)
+    lesson = db.session.get(Lesson, lesson_id)
     if not lesson:
         return jsonify({"error": "Dars topilmadi"}), 404
 
@@ -537,29 +757,52 @@ def complete_lesson(lesson_id):
     if elapsed < 1200:
         return jsonify({"error": f"20 daqiqa to'liq kuting ({1200 - int(elapsed)} soniya qoldi)"}), 400
 
-    ls.completed = True
-    xp_gained, msg = add_xp(user, 7, 'lessons')
-
     progress = json.loads(user.progress or '{}')
     cid = lesson.course_id
     if str(cid) not in progress:
         progress[str(cid)] = {"completed": [], "percent": 0}
-    if lesson_id not in progress[str(cid)]["completed"]:
-        progress[str(cid)]["completed"].append(lesson_id)
-        course = Course.query.get(cid)
-        total = course.lessons.count()
-        progress[str(cid)]["percent"] = round((len(progress[str(cid)]["completed"]) / max(total, 1)) * 100)
+    already_done = lesson_id in progress[str(cid)].get('completed', [])
+
+    ls.completed = True
+    ls.xp_awarded = not already_done
+    # XP faqat bir marta — darsni qayta ochsa ham ball ikkinchi marta berilmaydi
+    xp_gained, msg = (0, "Bu dars allaqachon yakunlangan") if already_done \
+        else add_xp(user, 7, 'lessons')
+
+    if not already_done:
+        progress[str(cid)]['completed'].append(lesson_id)
+        course = db.session.get(Course, cid)
+        total = course.lessons.count() if course else 0
+        progress[str(cid)]['percent'] = round(
+            (len(progress[str(cid)]['completed']) / max(total, 1)) * 100
+        )
     user.progress = json.dumps(progress)
 
-    ls.xp_awarded = True
     db.session.commit()
-    check_achievements(user)
+    new_achievements = check_achievements(user)
 
-    return jsonify({"xpGained": xp_gained, "message": msg or "Dars yakunlandi!"})
+    return jsonify({
+        "xpGained": xp_gained,
+        "message": msg or "Dars yakunlandi!",
+        "percent": progress[str(cid)]['percent'],
+        "newAchievements": new_achievements
+    })
 
 # ══════════════════════════════════════════════════════════════════
 #  LANDING
 # ══════════════════════════════════════════════════════════════════
+@app.route('/api/public/groups', methods=['GET'])
+def public_groups():
+    """Ro'yxatdan o'tayotgan talaba guruhni tanlashi uchun.
+
+    Atrofdan `/api/groups` talab qiladi (o'quvchilar ro'yxati sizib chiqmasligi
+    uchun), shuning uchun ro'yxatdan o'tish oynasida ishlatiladigan alohida
+    endpoint kerak. Faqat id va nom qaytaradi — boshqa hech narsa.
+    """
+    rows = db.session.query(Group.id, Group.name).order_by(Group.name).all()
+    return jsonify([{"id": gid, "name": gname} for gid, gname in rows])
+
+
 @app.route('/api/landing', methods=['GET'])
 def get_landing():
     return jsonify(LandingData.get_data())
@@ -579,7 +822,7 @@ def update_landing():
 @jwt_required()
 def get_tickets():
     user = get_current_user()
-    if user.role == 'admin':
+    if user.role in ('admin', 'tech_admin', 'director'):
         tickets = Ticket.query.order_by(Ticket.created_at.desc()).all()
     else:
         tickets = Ticket.query.filter_by(user_id=user.id).order_by(Ticket.created_at.desc()).all()
@@ -589,9 +832,12 @@ def get_tickets():
 @jwt_required()
 def create_ticket():
     user = get_current_user()
-    data = request.json
+    data = request.json or {}
+    message = (data.get('message') or '').strip()
+    if not message:
+        return jsonify({"error": "Xabar bo'sh bo'lamaydi"}), 400
     ticket = Ticket(user_id=user.id, user_name=user.full_name,
-                    message=data.get('message', ''), status='Ochiq', replies='[]')
+                    message=message, status='Ochiq', replies='[]')
     db.session.add(ticket)
     db.session.commit()
     return jsonify(ticket.to_dict()), 201
@@ -599,16 +845,21 @@ def create_ticket():
 @app.route('/api/tickets/<int:ticket_id>/reply', methods=['POST'])
 @jwt_required()
 def reply_ticket(ticket_id):
-    ticket = Ticket.query.get(ticket_id)
+    ticket = db.session.get(Ticket, ticket_id)
     if not ticket:
         return jsonify({"error": "Ticket topilmadi"}), 404
     user = get_current_user()
-    data = request.json
+    if ticket.user_id != user.id and user.role not in ('admin', 'tech_admin', 'director'):
+        return jsonify({"error": "Ruxsat yo'q"}), 403
+    data = request.json or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({"error": "Javob bo'sh bo'lamaydi"}), 400
     replies = json.loads(ticket.replies or '[]')
     replies.append({
         "id": int(time.time() * 1000),
         "user_id": user.id, "user_name": user.full_name,
-        "text": data.get('text', '')
+        "text": text
     })
     ticket.replies = json.dumps(replies)
     db.session.commit()
@@ -630,56 +881,128 @@ def update_ticket_status(ticket_id):
 @app.route('/api/groups', methods=['GET'])
 @jwt_required()
 def get_groups():
-    groups = Group.query.all()
+    user = get_current_user()
+    if user.role in ('admin', 'tech_admin', 'director'):
+        groups = Group.query.all()
+    else:
+        gids = user_group_ids(user)
+        groups = Group.query.filter(Group.id.in_(gids)).all() if gids else []
     return jsonify([g.to_dict() for g in groups])
+
+@app.route('/api/groups', methods=['POST'])
+@role_required('admin', 'tech_admin')
+def create_group():
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({"error": "Guruh nomi to'ldirilishi shart"}), 400
+    group = Group(
+        name=name, ustoz_id=data.get('ustozId') or None,
+        student_ids=json.dumps(data.get('studentIds') or []),
+        schedule=json.dumps(data.get('schedule') or [])
+    )
+    db.session.add(group)
+    db.session.commit()
+    return jsonify(group.to_dict()), 201
+
+@app.route('/api/groups/<int:gid>', methods=['DELETE'])
+@role_required('admin', 'tech_admin')
+def delete_group(gid):
+    group = db.session.get(Group, gid)
+    if not group:
+        return jsonify({"error": "Guruh topilmadi"}), 404
+    for u in User.query.filter_by(group_id=gid).all():
+        u.group_id = None
+    db.session.delete(group)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route('/api/groups/<int:gid>', methods=['PATCH'])
 @jwt_required()
 def update_group(gid):
-    group = Group.query.get(gid)
+    group = db.session.get(Group, gid)
     if not group:
         return jsonify({"error": "Guruh topilmadi"}), 404
-    data = request.json
-    if 'schedule' in data: group.schedule = json.dumps(data['schedule'])
-    if 'studentIds' in data: group.student_ids = json.dumps(data['studentIds'])
+    user = get_current_user()
+    allowed = user_group_ids(user)
+    if gid not in allowed:
+        return jsonify({"error": "Ruxsat yo'q"}), 403
+    data = request.json or {}
+
+    if 'schedule' in data:
+        group.schedule = json.dumps(data['schedule'] or [])
+    if 'name' in data and data['name'].strip():
+        group.name = data['name'].strip()
+    if 'studentIds' in data and user.role in ('admin', 'tech_admin', 'director'):
+        new_ids = [int(i) for i in data['studentIds']]
+        for u in User.query.filter_by(group_id=gid).all():
+            if u.id not in new_ids:
+                u.group_id = None
+        for sid in new_ids:
+            u = db.session.get(User, sid)
+            if u:
+                u.group_id = gid
+        group.student_ids = json.dumps(new_ids)
+    elif 'studentIds' in data and user.role == 'ustoz':
+        # ustoz o'z guruhiga talaba qo'sha oladi, lekin olib tashlay olmaydi
+        current = json.loads(group.student_ids or '[]')
+        for sid in data['studentIds']:
+            sid = int(sid)
+            u = db.session.get(User, sid)
+            if u and u.role == 'student' and sid not in current:
+                current.append(sid)
+                u.group_id = gid
+        group.student_ids = json.dumps(current)
+    if 'ustozId' in data and user.role in ('admin', 'tech_admin'):
+        group.ustoz_id = data['ustozId'] or None
     db.session.commit()
     return jsonify(group.to_dict())
 
 @app.route('/api/attendance', methods=['GET'])
-@jwt_required()
+@role_required(*STAFF_ROLES)
 def get_attendance():
+    """Davomat yozuvlari faqat xodimlarga — student o'z tarixini
+    /api/attendance/my orqali oladi."""
     records = Attendance.query.all()
     return jsonify([r.to_dict() for r in records])
 
 @app.route('/api/attendance', methods=['POST'])
-@jwt_required()
+@role_required('ustoz', 'admin', 'tech_admin', 'director')
 def mark_attendance():
-    data = request.json
-    record = Attendance.query.filter_by(group_id=data['groupId'], date=data['date']).first()
+    user = get_current_user()
+    data = request.json or {}
+    gid = data.get('groupId')
+    if gid is None or 'studentId' not in data or 'status' not in data:
+        return jsonify({"error": "groupId, studentId va status talab qilinadi"}), 400
+    if gid not in user_group_ids(user):
+        return jsonify({"error": "Ruxsat yo'q"}), 403
+    if data['status'] not in ('present', 'absent'):
+        return jsonify({"error": "status 'present' yoki 'absent' bo'lishi kerak"}), 400
+
+    # Sana kelmagan bo'lsa — bugungi kun (avval `data['date']` KeyError berardi)
+    date = data.get('date') or datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+    record = Attendance.query.filter_by(group_id=gid, date=date).first()
     if not record:
-        record = Attendance(group_id=data['groupId'], date=data['date'], records='{}', reasons='{}')
+        record = Attendance(group_id=gid, date=date, records='{}', reasons='{}')
         db.session.add(record)
 
     records = json.loads(record.records or '{}')
     old_status = records.get(str(data['studentId']))
-    new_status = data['status']
-    records[str(data['studentId'])] = new_status
+    records[str(data['studentId'])] = data['status']
     record.records = json.dumps(records)
 
-    if 'reason' in data:
-        reasons = json.loads(record.reasons or '{}')
-        reasons[str(data['studentId'])] = data['reason']
-        record.reasons = json.dumps(reasons)
+    reasons = json.loads(record.reasons or '{}')
+    reasons[str(data['studentId'])] = data.get('reason', '')
+    record.reasons = json.dumps(reasons)
 
     db.session.commit()
 
-    if new_status == 'absent' and old_status != 'absent':
-        student_id = data['studentId']
-        student = User.query.get(student_id)
-        group = Group.query.get(data['groupId'])
+    if data['status'] == 'absent' and old_status != 'absent':
+        group = db.session.get(Group, gid)
         group_name = group.name if group else ''
-        msg = f"Siz {group_name} guruhida {data['date']} kuni darsga kelmadingiz!"
-        notify_student(student_id, msg, 'warning')
+        notify_student(data['studentId'],
+                       f"Siz {group_name} guruhida {date} kuni darsga kelmadingiz!", 'warning')
 
     return jsonify(record.to_dict())
 
@@ -695,6 +1018,9 @@ def get_attendance_by_date(date):
 @app.route('/api/chat/<int:group_id>', methods=['GET'])
 @jwt_required()
 def get_chat(group_id):
+    user = get_current_user()
+    if group_id != 0 and group_id not in user_group_ids(user):
+        return jsonify({"error": "Ruxsat yo'q"}), 403
     msgs = ChatMessage.query.filter_by(group_id=group_id).order_by(ChatMessage.id.asc()).all()
     return jsonify([m.to_dict() for m in msgs])
 
@@ -702,10 +1028,16 @@ def get_chat(group_id):
 @jwt_required()
 def send_chat():
     user = get_current_user()
-    data = request.json
+    data = request.json or {}
+    gid = data.get('groupId')
+    if gid is None or gid not in user_group_ids(user):
+        return jsonify({"error": "Ruxsat yo'q"}), 403
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({"error": "Xabar bo'sh bo'lamaydi"}), 400
     msg = ChatMessage(
-        group_id=data['groupId'], user_id=user.id, user_name=user.full_name,
-        text=data.get('text', ''), time=datetime.now(timezone.utc).strftime('%H:%M'),
+        group_id=gid, user_id=user.id, user_name=user.full_name,
+        text=text, time=datetime.now(timezone.utc).strftime('%H:%M'),
         type=data.get('type', 'text')
     )
     db.session.add(msg)
@@ -715,15 +1047,111 @@ def send_chat():
 # ══════════════════════════════════════════════════════════════════
 #  QUESTIONS, BOOKS, ACHIEVEMENTS
 # ══════════════════════════════════════════════════════════════════
+QUIZ_TYPES = ('duel', 'mini_game', 'quiz')
+
+
+def _norm_quiz_type(value, default='duel'):
+    """Tur nomini bitta ko'rinishga keltiradi.
+
+    Eski versiyalar 'miniGame' yozgan, yangilar 'mini_game' — ikkalasi ham
+    qabul qilinadi, saqlanadigani har doim QUIZ_TYPES ichidan.
+    """
+    v = (value or '').strip().lower().replace('-', '_')
+    if v in ('minigame', 'mini', 'game'):
+        return 'mini_game'
+    return v if v in QUIZ_TYPES else default
+
+
 @app.route('/api/questions', methods=['GET'])
+@jwt_required()
 def get_questions():
     questions = Question.query.all()
     return jsonify([q.to_dict() for q in questions])
+
+
+@app.route('/api/questions', methods=['POST'])
+@role_required('ustoz', 'admin', 'tech_admin')
+def create_question():
+    data = request.json or {}
+    text = (data.get('questionText') or '').strip()
+    if not text:
+        return jsonify({"error": "Savol matni to'ldirilishi shart"}), 400
+    correct = (data.get('correctAnswer') or 'A').upper()
+    if correct not in ('A', 'B', 'C', 'D'):
+        return jsonify({"error": "To'g'ri javob A, B, C yoki D bo'lishi kerak"}), 400
+    options = [data.get('optionA'), data.get('optionB'), data.get('optionC'), data.get('optionD')]
+    if not all(o and str(o).strip() for o in options):
+        return jsonify({"error": "Barcha 4 ta variant to'ldirilishi shart"}), 400
+
+    q = Question(
+        question_text=text,
+        option_a=str(options[0]), option_b=str(options[1]),
+        option_c=str(options[2]), option_d=str(options[3]),
+        correct_answer=correct,
+        question_type=_norm_quiz_type(data.get('type')),
+        difficulty=data.get('difficulty', 'medium')
+    )
+    db.session.add(q)
+    db.session.commit()
+    return jsonify(q.to_dict()), 201
+
+@app.route('/api/questions/<int:qid>', methods=['PATCH', 'DELETE'])
+@role_required('ustoz', 'admin', 'tech_admin')
+def update_question(qid):
+    q = db.session.get(Question, qid)
+    if not q:
+        return jsonify({"error": "Savol topilmadi"}), 404
+
+    if request.method == 'DELETE':
+        db.session.delete(q)
+        db.session.commit()
+        return jsonify({"success": True})
+
+    data = request.json or {}
+    if 'questionText' in data: q.question_text = data['questionText']
+    if 'optionA' in data: q.option_a = data['optionA']
+    if 'optionB' in data: q.option_b = data['optionB']
+    if 'optionC' in data: q.option_c = data['optionC']
+    if 'optionD' in data: q.option_d = data['optionD']
+    if 'correctAnswer' in data:
+        c = str(data['correctAnswer']).upper()
+        if c not in ('A', 'B', 'C', 'D'):
+            return jsonify({"error": "To'g'ri javob A, B, C yoki D bo'lishi kerak"}), 400
+        q.correct_answer = c
+    if 'type' in data: q.question_type = _norm_quiz_type(data['type'], q.question_type)
+    if 'difficulty' in data: q.difficulty = data['difficulty']
+    db.session.commit()
+    return jsonify(q.to_dict())
 
 @app.route('/api/books', methods=['GET'])
 def get_books():
     books = Book.query.all()
     return jsonify([b.to_dict() for b in books])
+
+@app.route('/api/books', methods=['POST'])
+@role_required('admin', 'tech_admin')
+def create_book():
+    data = request.json or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        return jsonify({"error": "Kitob nomi to'ldirilishi shart"}), 400
+    book = Book(
+        title=title, description=data.get('description', ''),
+        image=data.get('image') or '', link=data.get('link') or '#'
+    )
+    db.session.add(book)
+    db.session.commit()
+    return jsonify(book.to_dict()), 201
+
+@app.route('/api/books/<int:bid>', methods=['DELETE'])
+@role_required('admin', 'tech_admin')
+def delete_book(bid):
+    book = db.session.get(Book, bid)
+    if not book:
+        return jsonify({"error": "Kitob topilmadi"}), 404
+    db.session.delete(book)
+    db.session.commit()
+    return jsonify({"success": True})
 
 @app.route('/api/achievements', methods=['GET'])
 def get_achievements():
@@ -756,25 +1184,43 @@ def mark_notifications_read():
 # ══════════════════════════════════════════════════════════════════
 #  SETTINGS
 # ══════════════════════════════════════════════════════════════════
+def _as_bool_text(value):
+    """JS'dan kelgan boolean/har qanday qiymatni 'true'/'false' matniga.
+
+    `str(True)` == 'True' bo'lgani uchun oddiy `str()` ishlamaydi —
+    tulkarning `allowRegistration` tugmasi hech qachon qayta yoqilmay qolardi.
+    """
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    return 'true' if str(value).strip().lower() in ('1', 'true', 'yes', 'on') else 'false'
+
+
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
-    return jsonify({
+    # Bot tokeni hamma uchun ochiq bo'lmasligi kerak — faqat admin/tech_admin.
+    data = {
         "platformName": Setting.get('platformName', "O'quv.uz"),
         "allowRegistration": Setting.get('allowRegistration', 'true') == 'true',
         "collegeLat": Setting.get('college_lat'),
         "collegeLng": Setting.get('college_lng'),
         "attendanceRadius": int(Setting.get('attendance_radius', '200') or 200),
-        "telegramBotToken": Setting.get('telegram_bot_token', ''),
-    })
+    }
+    try:
+        user = get_current_user()
+    except Exception:
+        user = None
+    if user and user.role in ('admin', 'tech_admin'):
+        data["telegramBotToken"] = Setting.get('telegram_bot_token', '')
+    return jsonify(data)
 
 @app.route('/api/settings', methods=['PATCH'])
 @role_required('tech_admin', 'admin')
 def update_settings():
-    data = request.json
-    if 'platformName' in data: Setting.set('platformName', data['platformName'])
-    if 'allowRegistration' in data: Setting.set('allowRegistration', str(data['allowRegistration']))
-    if 'collegeLat' in data: Setting.set('college_lat', str(data['collegeLat']))
-    if 'collegeLng' in data: Setting.set('college_lng', str(data['collegeLng']))
+    data = request.json or {}
+    if 'platformName' in data: Setting.set('platformName', str(data['platformName']).strip())
+    if 'allowRegistration' in data: Setting.set('allowRegistration', _as_bool_text(data['allowRegistration']))
+    if 'collegeLat' in data: Setting.set('college_lat', str(data['collegeLat']).strip())
+    if 'collegeLng' in data: Setting.set('college_lng', str(data['collegeLng']).strip())
     if 'attendanceRadius' in data: Setting.set('attendance_radius', str(data['attendanceRadius']))
     if 'telegramBotToken' in data: Setting.set('telegram_bot_token', data['telegramBotToken'])
     db.session.commit()
@@ -787,13 +1233,18 @@ def update_settings():
 @jwt_required()
 def add_xp_endpoint():
     user = get_current_user()
-    data = request.json
-    amount = data.get('amount', 0)
-    category = data.get('category', 'other')
-    gained, msg = add_xp(user, amount, category)
-    check_achievements(user)
+    data = request.json or {}
+    gained, msg = add_xp(user, data.get('amount', 0), data.get('category', 'other'))
+    # check_achievements o'z ichida commit qiladi — bitta marta chaqiramiz,
+    # aks holda javobdagi ro'yxat har doim bo'sh qaytadi.
+    new_achievements = check_achievements(user)
     db.session.refresh(user)
-    return jsonify({"xpGained": gained, "totalXp": user.xp, "message": msg, "newAchievements": check_achievements(user)})
+    return jsonify({
+        "xpGained": gained,
+        "totalXp": user.xp,
+        "message": msg,
+        "newAchievements": new_achievements
+    })
 
 @app.route('/api/duel/win', methods=['POST'])
 @jwt_required()
@@ -810,19 +1261,22 @@ def duel_win():
 #  STAFF CHAT
 # ══════════════════════════════════════════════════════════════════
 @app.route('/api/staff-chat', methods=['GET'])
-@jwt_required()
+@role_required(*STAFF_ROLES)
 def get_staff_chat():
     msgs = ChatMessage.query.filter_by(group_id=0).order_by(ChatMessage.id.asc()).all()
     return jsonify([m.to_dict() for m in msgs])
 
 @app.route('/api/staff-chat', methods=['POST'])
-@jwt_required()
+@role_required(*STAFF_ROLES)
 def send_staff_chat():
     user = get_current_user()
-    data = request.json
+    data = request.json or {}
+    text = (data.get('text') or '').strip()
+    if not text:
+        return jsonify({"error": "Xabar bo'sh bo'lamaydi"}), 400
     msg = ChatMessage(
         group_id=0, user_id=user.id, user_name=user.full_name,
-        text=data.get('text', ''), time=datetime.now(timezone.utc).strftime('%H:%M'),
+        text=text, time=datetime.now(timezone.utc).strftime('%H:%M'),
         type=data.get('type', 'text')
     )
     db.session.add(msg)
@@ -850,30 +1304,28 @@ def attendance_checkin():
     inside = distance <= radius
 
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    status = 'present' if inside else 'absent'
 
-    if user.group_id:
+    # Kolledjdan tashqarida bo'lsa "absent" deb yozmaymiz — bu noto'g'ri
+    # edi (GPS xatosi ham talabani kelmagan qilib belgilardi).
+    if inside and user.group_id:
         record = Attendance.query.filter_by(group_id=user.group_id, date=today).first()
         if not record:
             record = Attendance(group_id=user.group_id, date=today, records='{}', reasons='{}')
             db.session.add(record)
         records = json.loads(record.records or '{}')
-        old_status = records.get(str(user.id))
-        records[str(user.id)] = status
+        records[str(user.id)] = 'present'
         record.records = json.dumps(records)
         db.session.commit()
 
-        if status == 'absent' and old_status != 'absent':
-            notify_student(user.id,
-                f"Siz {today} kuni kolledjga kelmadingiz! Masofa: {int(distance)}m", 'warning')
-
     return jsonify({
         "success": True,
-        "status": status,
+        "status": 'present' if inside else 'outside',
         "distance": int(distance),
         "radius": int(radius),
         "inside": inside,
-        "message": f"Masofa: {int(distance)}m. {'Kolledjdasiz!' if inside else 'Siz kolledjdan tashqaridasiz!'}"
+        "message": (f"Masofa: {int(distance)}m. Kolledjdasiz — davomat belgilandi!"
+                    if inside else
+                    f"Masofa: {int(distance)}m. Kolledj radiusidan tashqaridasiz ({int(radius)}m), davomat belgilanmadi.")
     })
 
 @app.route('/api/attendance/my', methods=['GET'])
@@ -918,21 +1370,30 @@ def get_grades():
 @role_required('ustoz', 'admin', 'tech_admin')
 def create_grade():
     user = get_current_user()
-    data = request.json
+    data = request.json or {}
+    sid, cid, value = data.get('studentId'), data.get('courseId'), data.get('value')
+    if not sid or not cid or value is None:
+        return jsonify({"error": "studentId, courseId va value talab qilinadi"}), 400
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Baho butun son bo'lishi kerak"}), 400
+    if value < 1 or value > 5:
+        return jsonify({"error": "Baho 1 dan 5 gacha bo'lishi kerak"}), 400
+    if not db.session.get(User, int(sid)):
+        return jsonify({"error": "Talaba topilmadi"}), 404
+    if not db.session.get(Course, int(cid)):
+        return jsonify({"error": "Kurs topilmadi"}), 404
+
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     grade = Grade(
-        student_id=data['studentId'],
-        course_id=data['courseId'],
-        teacher_id=user.id,
-        value=data['value'],
-        comment=data.get('comment', ''),
-        date=data.get('date', today)
+        student_id=int(sid), course_id=int(cid), teacher_id=user.id,
+        value=value, comment=data.get('comment', ''), date=data.get('date', today)
     )
     db.session.add(grade)
     db.session.commit()
 
-    notify_student(data['studentId'],
-        f"Sizga yangi baho qo'yildi: {data['value']} ({today})", 'info')
+    notify_student(int(sid), f"Sizga yangi baho qo'yildi: {value} ({today})", 'info')
 
     return jsonify(grade.to_dict()), 201
 
