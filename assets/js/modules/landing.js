@@ -62,7 +62,7 @@ function renderLanding() {
             <div class="d-flex items-center justify-between gap-3"
                  style="background:rgba(255,255,255,.85);backdrop-filter:blur(14px);border-radius:999px;padding:10px 12px 10px 18px;box-shadow:var(--sh-sm);border:1px solid var(--border)">
                 <div class="brand">
-                    <div class="brand-mark"><i data-lucide="graduation-cap"></i></div>
+                    <div class="brand-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
                     <div class="d-none d-sm-block">
                         <div class="brand-name" style="color:var(--gray-900);font-size:1rem">O’quv.uz</div>
                         <div class="brand-sub">LMS Platform</div>
@@ -226,7 +226,7 @@ function renderLanding() {
                 <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
                     <div>
                         <div class="d-flex items-center gap-3">
-                            <div class="brand-mark"><i data-lucide="graduation-cap"></i></div>
+                            <div class="brand-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
                             <span style="font-size:1.25rem;font-weight:900;color:#fff;font-style:italic">O’quv.uz</span>
                         </div>
                         <p class="t-sm mt-4" style="line-height:1.6;max-width:340px">

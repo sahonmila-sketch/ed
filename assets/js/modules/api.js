@@ -26,7 +26,12 @@ async function api(method, path, body = null) {
     const res = await fetch(`${API_BASE}${path}`, opts);
     if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Server xatosi' }));
-        throw new Error(err.error || `HTTP ${res.status}`);
+        // `status` kerak edi — masalan ota-onaning bolasi bog'lanmagan bo'lsa
+        // 404 keladi va mijoz "bo'sh" holatni boshqa xatodan ajratishi kerak.
+        const e = new Error(err.error || `HTTP ${res.status}`);
+        e.status = res.status;
+        e.data = err;
+        throw e;
     }
     return res.json();
 }

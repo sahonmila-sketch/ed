@@ -6,10 +6,10 @@
     <title>O’quv.uz — Ta’lim platformasi</title>
     <meta name="description" content="O’quv.uz — zamonaviy ta’lim platformasi. Kurslar, darslar, baholar, davomat va reyting.">
     <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="assets/img/icon-192x192.png">
-    <link rel="stylesheet" href="assets/css/styles.css?v=33">
+    <link rel="apple-touch-icon" href="assets/img/icon-180.png">
+    <link rel="stylesheet" href="assets/css/styles.css?v=36">
     <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#0b1220">
+    <meta name="theme-color" content="#2563eb">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -23,7 +23,7 @@
         <div class="splash-blob splash-blob-2"></div>
         <div class="splash-blob splash-blob-3"></div>
         <div class="splash-inner">
-            <div class="splash-mark"><i data-lucide="graduation-cap"></i></div>
+            <div class="splash-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
             <h1 class="splash-title">O’quv<span style="color:#93c5fd">.uz</span></h1>
             <p class="splash-tag">Zamonaviy ta’lim platformasi</p>
             <div class="splash-bar"><i></i></div>
@@ -73,13 +73,13 @@
     <aside id="sidebar-container" class="app-sidebar">
         <div class="sb-head">
             <div class="brand">
-                <div class="brand-mark"><i data-lucide="graduation-cap"></i></div>
+                <div class="brand-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
                 <div style="min-width:0">
                     <div class="brand-name truncate">O’quv.uz</div>
                     <div class="brand-sub">LMS Platform</div>
                 </div>
             </div>
-            <button id="sidebar-close" class="btn-icon" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1);color:#94a3b8" aria-label="Yopish">
+            <button id="sidebar-close" class="sb-close" aria-label="Yopish">
                 <i data-lucide="x"></i>
             </button>
         </div>
@@ -93,7 +93,7 @@
                     <div id="sidebar-name" class="sb-user-name truncate">Foydalanuvchi</div>
                     <div id="sidebar-role" class="sb-user-role">rol</div>
                 </div>
-                <i data-lucide="chevron-right" style="width:16px;height:16px;color:#475569"></i>
+                <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--gray-400)"></i>
             </button>
         </div>
     </aside>
@@ -107,13 +107,21 @@
         <header id="mobile-header" class="app-topbar hidden">
             <div class="brand">
                 <div class="brand-mark" style="width:36px;height:36px;border-radius:11px">
-                    <i data-lucide="graduation-cap" style="width:19px;height:19px"></i>
+                    <img src="assets/img/logo.png" alt="O’quv.uz">
                 </div>
                 <div style="min-width:0">
                     <div class="brand-name" style="font-size:.9375rem">O’quv.uz</div>
                 </div>
             </div>
             <div class="d-flex items-center gap-2">
+                <button class="tb-user" onclick="go('profile')" aria-label="Profilim">
+                    <div id="topbar-avatar" class="avatar avatar-sm">?</div>
+                    <div style="min-width:0">
+                        <div id="topbar-name" class="tb-user-name truncate">Foydalanuvchi</div>
+                        <div id="topbar-role" class="tb-user-role truncate">rol</div>
+                    </div>
+                    <i data-lucide="chevron-down"></i>
+                </button>
                 <button id="mobile-notif-btn" data-notif-anchor class="btn-icon sm" aria-label="Bildirishnomalar">
                     <i data-lucide="bell"></i>
                 </button>
@@ -133,7 +141,7 @@
             <!-- Login -->
             <section id="view-login" class="view-section hidden auth-wrap" style="margin:-16px -14px -24px;padding:20px">
                 <div class="auth-card">
-                    <div class="auth-mark"><i data-lucide="graduation-cap"></i></div>
+                    <div class="auth-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
                     <h1 class="auth-title">Xush kelibsiz</h1>
                     <p class="auth-sub">O’quv.uz platformasiga kirish</p>
 
@@ -250,11 +258,11 @@
         <div id="modal-content-area" style="position:relative;z-index:1;width:100%;max-width:560px;display:flex;justify-content:center"></div>
     </div>
 
-    <script type="module" src="assets/js/app.js?v=33"></script>
+    <script type="module" src="assets/js/app.js?v=36"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js?v=33').catch(() => {});
+                navigator.serviceWorker.register('/sw.js?v=36').catch(() => {});
             });
         }
     </script>

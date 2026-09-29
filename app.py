@@ -1459,6 +1459,132 @@ def get_parent_child_attendance():
             result.append({'date': r.date, 'status': parsed[str(child.id)]})
     return jsonify(result)
 
+@app.route('/api/parent/child/report', methods=['GET'])
+@role_required('parent')
+def get_parent_child_report():
+    """Bola haqidagi to'liq hisobot: baholar, davomat (royxat + oy kesimi),
+    kurslar bo'yicha progress va o'quv natijalari. Ota-ona panelida
+    "hamma narsa ko'rinishi" uchun bitta so'rovda qaytariladi."""
+    user = get_current_user()
+    if not user.parent_of_id:
+        return jsonify({"error": "Bola bog'lanmagan"}), 404
+    child = User.query.get(user.parent_of_id)
+    if not child:
+        return jsonify({"error": "Bola topilmadi"}), 404
+
+    # ── Baholar (eng yangilari birinchi) ──────────────────────────────
+    grade_rows = (Grade.query.filter_by(student_id=child.id)
+                  .order_by(Grade.created_at.desc(), Grade.id.desc()).all())
+    course_titles = {c.id: c.title for c in Course.query.all()}
+    teacher_names = {}
+    grades = []
+    for g in grade_rows:
+        d = g.to_dict()
+        d['courseTitle'] = course_titles.get(g.course_id, '—')
+        if g.teacher_id:
+            if g.teacher_id not in teacher_names:
+                t = db.session.get(User, g.teacher_id)
+                teacher_names[g.teacher_id] = t.full_name if t else ''
+            d['teacher'] = teacher_names[g.teacher_id]
+        else:
+            d['teacher'] = ''
+        grades.append(d)
+
+    avg = round(sum(g['value'] for g in grades) / len(grades), 1) if grades else 0
+    best = max((g['value'] for g in grades), default=0)
+    g5 = sum(1 for g in grades if g['value'] == 5)
+    g4 = sum(1 for g in grades if g['value'] == 4)
+    g3 = sum(1 for g in grades if g['value'] == 3)
+    g2 = sum(1 for g in grades if g['value'] in (1, 2))
+
+    # ── Davomat ────────────────────────────────────────────────────────
+    records = []
+    if child.group_id:
+        for r in (Attendance.query.filter_by(group_id=child.group_id)
+                  .order_by(Attendance.date.desc()).all()):
+            parsed = json.loads(r.records or '{}')
+            if str(child.id) in parsed:
+                records.append({'date': r.date, 'status': parsed[str(child.id)]})
+
+    present = sum(1 for r in records if r['status'] == 'present')
+    late = sum(1 for r in records if r['status'] == 'late')
+    absent = sum(1 for r in records if r['status'] in ('absent', 'absent_unexcused'))
+    excused = sum(1 for r in records if r['status'] == 'excused')
+    total = len(records)
+
+    # Oylar kesimidagi foiz (faqat oylar bo'yicha jamlama)
+    by_month = {}
+    for r in records:
+        mth = (r['date'] or '')[:7]
+        if len(mth) != 7:
+            continue
+        slot = by_month.setdefault(mth, {'month': mth, 'present': 0, 'absent': 0, 'total': 0})
+        slot['total'] += 1
+        if r['status'] == 'present':
+            slot['present'] += 1
+        elif r['status'] in ('absent', 'absent_unexcused'):
+            slot['absent'] += 1
+    months = sorted(by_month.values(), key=lambda x: x['month'], reverse=True)
+    for m in months:
+        m['percent'] = round((m['present'] / m['total']) * 100) if m['total'] else 0
+
+    # ── Kurslar bo'yicha progress ─────────────────────────────────────
+    # `users.progress` — TEXT ustun (JSON satr), modelda `dict` emas,
+    # shuning uchun avval yozib olish kerak.
+    try:
+        progress = json.loads(child.progress or '{}')
+    except (TypeError, ValueError):
+        progress = {}
+    if not isinstance(progress, dict):
+        progress = {}
+    courses = []
+    for cid, pct in (progress or {}).items():
+        try:
+            cid_i = int(cid)
+        except (TypeError, ValueError):
+            continue
+        c = Course.query.get(cid_i)
+        if not c:
+            continue
+        done_ids = set()
+        pct_val = 0
+        if isinstance(pct, dict):
+            done_ids = {str(x) for x in (pct.get('completed') or [])}
+            try:
+                pct_val = int(pct.get('percent') or 0)
+            except (TypeError, ValueError):
+                pct_val = 0
+        lessons = Lesson.query.filter_by(course_id=c.id).all()
+        done = sum(1 for ls in lessons if str(ls.id) in done_ids)
+        total_l = len(lessons)
+        # Foiz eski ma'lumotda yo'q bo'lsa — haqiqiy yakunlanganlikdan hisoblaymiz
+        if not pct_val and total_l:
+            pct_val = round((done / total_l) * 100)
+        courses.append({
+            'id': c.id, 'title': c.title,
+            'percent': max(0, min(100, pct_val)),
+            'completed': done, 'totalLessons': total_l,
+        })
+    courses.sort(key=lambda x: (-x['percent'], x['title']))
+
+    return jsonify({
+        'childId': child.id,
+        'grades': grades,
+        'gradeStats': {
+            'total': len(grades), 'avg': avg, 'best': best,
+            'g5': g5, 'g4': g4, 'g3': g3, 'g2': g2,
+        },
+        'attendance': {
+            'records': records,
+            'present': present, 'late': late, 'absent': absent,
+            'excused': excused, 'total': total,
+            'percent': round((present / total) * 100) if total else 0,
+            'byMonth': months,
+        },
+        'courses': courses,
+    })
+
+
 @app.route('/api/telegram/bind', methods=['POST'])
 @jwt_required()
 def bind_telegram():

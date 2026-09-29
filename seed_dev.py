@@ -282,8 +282,10 @@ def main():
         wipe()
 
         # --- Аккаунты ---
+        # `completed` — o'sha kursga tegishli dars ID'lari bo'lishi kerak,
+        # aks holda ota-ona panelida "0/3, lekin 33%" kabi chalkashlik chiqadi.
         progress = json.dumps({"1": {"completed": [1, 2], "percent": 40},
-                               "2": {"completed": [1], "percent": 33}})
+                               "2": {"completed": [6], "percent": 33}})
         for uid, name, email, role, xp, gid, achs, parent_of, duel in USERS:
             u = User(id=uid, full_name=name, email=email, role=role, xp=xp, group_id=gid,
                      achievements=json.dumps(achs), duel_wins=duel,

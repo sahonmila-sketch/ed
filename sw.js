@@ -5,7 +5,7 @@
      • статика (/assets) — stale-while-revalidate
      • /api/*            — мимо кэша полностью (всегда свежие данные)
    ========================================================== */
-const CACHE = 'oquvuz-v33';
+const CACHE = 'oquvuz-v36';
 const SHELL = [
     '/',
     '/index.html',
@@ -17,8 +17,8 @@ const SHELL = [
     '/assets/js/modules/ui.js',
     '/assets/js/modules/landing.js',
     '/assets/img/favicon.svg',
-    '/assets/img/icon-192x192.png',
-    '/assets/img/icon-512x512.png',
+    '/assets/img/icon-192.png',
+    '/assets/img/icon-512.png',
 ];
 
 self.addEventListener('install', (e) => {

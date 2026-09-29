@@ -173,6 +173,7 @@ function mount(id, fn, onErrorTitle = 'Yuklab bo‘lmadi') {
             if (!node) return;                     // страница сменилась
             node.innerHTML = Array.isArray(html) ? html.join('') : (html ?? '');
             safeLucide(node);
+            animateIn(node);
         })
         .catch((e) => {
             const node = document.getElementById(id);
@@ -182,7 +183,36 @@ function mount(id, fn, onErrorTitle = 'Yuklab bo‘lmadi') {
                     <i data-lucide="refresh-cw"></i> Qayta urinish
                 </button>`);
             safeLucide(node);
+            animateIn(node);
         });
+}
+
+// ── Animatsiyalar ───────────────────────────────────────────────────
+// CSS'da `.fade-in` / `.slide-up` / `.stagger` sinflari bor edi, lekin
+// hech kim ularni qo'ymagan edi — shuning uchun sayt statik ko'rinyotgan.
+// Bu yerga ulab, har bir sahifa ochilishida kirish animatsiyasi va
+// qatorlar uchun ketma-ket (stagger) ko'rsatilish qo'shildi.
+
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Sahifa kontentiga kirish animatsiyasi + bolalarni ketma-ket ko'rsatadi. */
+function animateIn(root) {
+    // Yashirin tabda CSS animatsiyalar boshlanmaydi, `opacity:0` da qolib
+    // ketadi — shuning uchun ko'rinmaydigan holatda umuman qo'shmaymiz.
+    if (!root || REDUCED_MOTION || document.hidden) return;
+    root.classList.add('view-enter');
+    // Blok darajasidagi birinchi bolalar ketma-ket paydo bo'ladi.
+    Array.from(root.children).slice(0, 12).forEach((k, i) => {
+        if (!(k instanceof HTMLElement)) return;
+        k.classList.add('stagger');
+        k.style.setProperty('--stagger-i', String(i));
+    });
+    // Ro'yxa qatorlari va statistika plitalari ham ketma-ket keladi.
+    root.querySelectorAll('.list > .list-row, .grid > .stat').forEach((row, i) => {
+        if (i > 11) return;
+        row.classList.add('stagger');
+        row.style.setProperty('--stagger-i', String(i));
+    });
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -204,6 +234,7 @@ const getGrades = () => api_get('/grades');
 const getStudentGrades = (sid) => api_get(`/grades/student/${sid}`);
 const getParentChild = () => api_get('/parent/child');
 const getParentAtt = () => api_get('/parent/child/attendance');
+const getParentReport = () => api_get('/parent/child/report');
 const getSettingsAPI = () => api_get('/settings');
 
 async function loadUserData() {
@@ -602,6 +633,14 @@ function updateHeaderUser() {
         .replace(/^/, '').replace('class="avatar', `id="sidebar-avatar" class="avatar`);
     if (nm) nm.textContent = u.ism;
     if (rl) rl.textContent = roleLabel(u.role);
+    // Tepa paneldagi chiplar ham xuddi shu ma'lumotni ko'rsatadi
+    const tAv = document.getElementById('topbar-avatar');
+    const tNm = document.getElementById('topbar-name');
+    const tRl = document.getElementById('topbar-role');
+    if (tAv) tAv.outerHTML = avatarHtml(u, 'avatar-sm')
+        .replace('class="avatar', 'id="topbar-avatar" class="avatar');
+    if (tNm) tNm.textContent = u.ism;
+    if (tRl) tRl.textContent = roleLabel(u.role);
 }
 
 function setShellChrome(on) {
@@ -675,6 +714,7 @@ async function renderView(view) {
         const html = await renderer();
         area.innerHTML = html;
         safeLucide(area);
+        animateIn(area);
         runAfterRender(view);
     } catch (e) {
         area.innerHTML = emptyState('triangle-alert', 'Xatolik yuz berdi', e?.message || '', `
@@ -682,6 +722,7 @@ async function renderView(view) {
                 <i data-lucide="arrow-left"></i> Orqaga
             </button>`);
         safeLucide(area);
+        animateIn(area);
     }
     updateNotifBadges();
 }
@@ -1577,7 +1618,7 @@ async function d_admin() {
                             <div class="grow"><div class="list-title">Ochilgan ticketlar</div></div>
                             <span class="badge ${openTickets.length ? 'badge-red' : ''}">${openTickets.length}</span>
                         </button>
-                    </div>`, { icon: '<i data-lucide="shortcuts"></i>' })}
+                    </div>`, { icon: '<i data-lucide="keyboard"></i>' })}
             </div>
         </div>`;
 }
@@ -1648,52 +1689,217 @@ async function d_director() {
         </div>`;
 }
 
-async function d_parent() {
-    const [child, att] = await Promise.all([
-        getParentChild().catch(() => null),
-        getParentAtt().catch(() => []),
-    ]);
+// ── Ota-ona uchun qulaylik: davomat holatlari va ularning belgilari ──
+const ATT_STATUS = {
+    present:            { label: 'Kelgan',      badge: 'badge-green' },
+    late:               { label: 'Kechikdi',    badge: 'badge-amber' },
+    absent:             { label: 'Kelmadi',     badge: 'badge-red' },
+    absent_unexcused:   { label: 'Sababsiz',    badge: 'badge-red' },
+    excused:            { label: 'Sababli',     badge: 'badge-blue' },
+};
+const attMeta = (st) => ATT_STATUS[st] || { label: st || '—', badge: '' };
 
-    if (!child) {
+/** Davomat oxirgi N kuni topadi — ota-ona uchun "bugungi holat". */
+function attStreak(records) {
+    let n = 0;
+    for (const r of records) {                 // records — eng yangidan eskiya
+        if (r.status === 'present' || r.status === 'late') n++;
+        else break;
+    }
+    return n;
+}
+
+async function d_parent() {
+    // Bitta so'rovda bolaning barcha natijalari — 3 ta alohida so'rov
+    // o'rniga bittasi (tezroq, va kelganda yangi bo'limlar ham qo'shiladi).
+    const rep = await getParentReport().catch((e) => {
+        if (e?.status === 404) return null;
+        throw e;
+    });
+
+    if (!rep) {
         return pageHead('Boshqaruv paneli', 'Bolangizga ulangan ma’lumot topilmadi')
             + emptyState('user-round-x', 'Bola bog‘lanmagan', 'Administrator bilan bog‘lanishni so‘rang.');
     }
 
-    const present = (att || []).filter(a => a.status === 'present').length;
-    const attTotal = (att || []).length;
-    const attPct = attTotal ? Math.round((present / attTotal) * 100) : 0;
-    const s = userStats(child);
+    const child = await getParentChild().catch(() => null);
+    const gs = rep.gradeStats || {};
+    const att = rep.attendance || { records: [], byMonth: [] };
+    const records = att.records || [];
+    const attPct = att.percent || 0;
+    const s = child ? userStats(child) : { lessonsDone: 0 };
+    const streak = attStreak(records);
+    const avg = gs.avg || 0;
 
     return `
-        ${heroPanel({ ism: `${STATE.user.ism} — bolangiz` }, `${child.ism} · ${child.groupName || 'Guruh birilmagan'}`, `
+        ${heroPanel(child || { ism: STATE.user.ism }, `${child?.ism || 'Bola'} · ${child?.groupName || 'Guruh birilmagan'}`, `
             <div class="d-flex gap-2 mt-5 flex-wrap">
-                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="zap"></i> ${child.points} XP</span>
+                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="zap"></i> ${child?.points || 0} XP</span>
                 <span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="book-open-check"></i> ${s.lessonsDone} dars</span>
+                ${avg ? `<span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="graduation-cap"></i> o‘rtacha ${avg}</span>` : ''}
             </div>`)}
 
         <div class="grid grid-4 mt-6">
-            ${statTile({ label: 'Ballar', value: child.points, icon: 'zap', tone: 'accent' })}
-            ${statTile({ label: 'Darslar', value: s.lessonsDone, icon: 'book-open-check' })}
-            ${statTile({ label: 'Davomat', value: `${attPct}%`, icon: 'user-check', tone: attPct >= 70 ? 'green' : 'amber', foot: `${present}/${attTotal}` })}
-            ${statTile({ label: 'Yutuqlar', value: `${(child.achievements || []).length}`, icon: 'award', tone: 'violet' })}
+            ${statTile({ label: 'Ballar', value: child?.points || 0, icon: 'zap', tone: 'accent' })}
+            ${statTile({ label: 'Darslar', value: s.lessonsDone, icon: 'book-open-check', foot: `${rep.courses.length} ta kurs` })}
+            ${statTile({
+                label: 'Davomat', value: `${attPct}%`, icon: 'user-check',
+                tone: attPct >= 80 ? 'green' : attPct >= 60 ? 'amber' : 'red',
+                foot: `${att.present}/${att.total} kun`,
+            })}
+            ${statTile({
+                label: 'O‘rtacha baho', value: avg || '—', icon: 'graduation-cap',
+                tone: avg >= 4.5 ? 'green' : avg >= 3.5 ? 'amber' : 'red',
+                foot: `${gs.total || 0} ta baho`,
+            })}
         </div>
 
-        <div class="mt-6">
-            ${sectionCard('Davomat tarixi', (att || []).length === 0
-                ? emptyState('calendar-x', 'Davomat yozuvlari yo‘q')
-                : `<div class="grid grid-4">
-                    ${[...att].reverse().slice(0, 20).map(a => `
-                        <div class="stat" style="text-align:center;padding:14px">
-                            <div class="t-xs fw-8" style="text-transform:none;letter-spacing:0">${esc(a.date)}</div>
-                            <div class="mt-2">
-                                <span class="badge ${a.status === 'present' ? 'badge-green' : 'badge-red'}">
-                                    ${a.status === 'present' ? 'Kelgan' : 'Kelmagan'}
-                                </span>
-                            </div>
-                        </div>`).join('')}
-                </div>`, { icon: '<i data-lucide="calendar-check"></i>' })}
+        <div class="mt-6 stack">
+            ${parentGradesCard(rep)}
+            ${parentAttendanceCard(att, records)}
+            ${parentCoursesCard(rep.courses || [])}
         </div>`;
 }
+
+/** Bolaning BARCHA baholari + taqsimoti. */
+function parentGradesCard(rep) {
+    const grades = rep.grades || [];
+    const gs = rep.gradeStats || {};
+    const dist = [
+        { k: 5, n: gs.g5 || 0, c: 'badge-green' },
+        { k: 4, n: gs.g4 || 0, c: 'badge-blue' },
+        { k: 3, n: gs.g3 || 0, c: 'badge-amber' },
+        { k: 2, n: gs.g2 || 0, c: 'badge-red' },
+    ];
+
+    const body = grades.length === 0
+        ? emptyState('graduation-cap', 'Hali baho qo‘yilmagan', 'O‘qituvchi baho qo‘yganida shu yerda ko‘rinadi.')
+        : `
+        <div class="grid grid-4 mb-5">
+            ${dist.map(d => `
+                <div class="stat" style="text-align:center;padding:14px">
+                    <div class="stat-value">${d.n}</div>
+                    <div class="mt-2"><span class="badge ${d.c}">${d.k} baho</span></div>
+                </div>`).join('')}
+        </div>
+
+        <div class="table-wrap">
+            <table class="table responsive">
+                <thead><tr>
+                    <th data-label="Sana">Sana</th>
+                    <th data-label="Kurs">Kurs</th>
+                    <th data-label="O‘qituvchi">O‘qituvchi</th>
+                    <th data-label="Baho" class="text-center">Baho</th>
+                    <th data-label="Izoh">Izoh</th>
+                </tr></thead>
+                <tbody>
+                    ${grades.map(g => `
+                        <tr>
+                            <td data-label="Sana"><span class="t-xs">${esc(g.date || '—')}</span></td>
+                            <td data-label="Kurs"><span class="fw-7">${esc(g.courseTitle || '—')}</span></td>
+                            <td data-label="O‘qituvchi"><span class="t-xs">${esc(g.teacher || '—')}</span></td>
+                            <td data-label="Baho" class="text-center">${gradePill(g.value)}</td>
+                            <td data-label="Izoh"><span class="t-xs">${esc(g.comment || '—')}</span></td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>`;
+
+    return sectionCard('Baholar', body, {
+        icon: '<i data-lucide="graduation-cap"></i>',
+        sub: gs.total ? `${gs.total} ta baho · o‘rtacha ${gs.avg} · eng yuqori ${gs.best}` : 'Hali baho yo‘q',
+    });
+}
+
+/** To‘liq davomat: jamlama, oylar kesimi, saralangan tarix. */
+function parentAttendanceCard(att, records) {
+    const months = att.byMonth || [];
+    const tone = att.percent >= 80 ? 'green' : att.percent >= 60 ? 'amber' : 'red';
+
+    const summary = `
+        <div class="grid grid-4 mb-5">
+            ${[
+                { label: 'Kelgan', n: att.present, i: 'user-check', c: 'green' },
+                { label: 'Kechikdi', n: att.late || 0, i: 'clock', c: 'amber' },
+                { label: 'Kelmadi', n: (att.absent || 0) + (att.excused || 0), i: 'user-x', c: 'red' },
+                { label: 'Umumiy', n: att.total, i: 'calendar-days', c: '' },
+            ].map(x => statTile({ label: x.label, value: x.n, icon: x.i, tone: x.c })).join('')}
+        </div>`;
+
+    const byMonth = months.length ? `
+        <div class="card card-pad mb-5" style="box-shadow:none;background:var(--surface-2)">
+            <div class="card-title mb-4"><i data-lucide="calendar-range"></i> Oylar bo‘yicha</div>
+            <div class="stack-sm">
+                ${months.map(m => `
+                    <div>
+                        <div class="d-flex items-center justify-between gap-3 mb-2">
+                            <span class="t-xs fw-7">${esc(m.month)}</span>
+                            <span class="t-xs">${m.present}/${m.total} kun · ${m.percent}%</span>
+                        </div>
+                        ${progressBar(m.percent, m.percent >= 80 ? 'green' : m.percent >= 60 ? 'amber' : 'red')}
+                    </div>`).join('')}
+            </div>
+        </div>` : '';
+
+    const history = records.length ? `
+        <div class="d-flex items-center gap-2 flex-wrap mb-4" id="p-att-filters">
+            ${[['all', 'Barchasi'], ['present', 'Kelgan'], ['late', 'Kechikdi'],
+               ['absent', 'Kelmadi'], ['excused', 'Sababli']].map(([k, l], i) =>
+                `<button class="btn ${i === 0 ? 'btn-primary' : 'btn-outline'} btn-sm" data-st="${k}"
+                         onclick="window.__parentAttFilter('${k}',this)">${l}</button>`).join('')}
+        </div>
+        <div class="list list-flush" id="p-att-list">
+            ${records.map(r => {
+                const m = attMeta(r.status);
+                return `
+                <div class="list-row" data-st="${esc(r.status || '')}">
+                    <div style="min-width:0">
+                        <div class="fw-7 t-sm">${esc(r.date || '—')}</div>
+                    </div>
+                    <span class="badge ${m.badge}">${m.label}</span>
+                </div>`;
+            }).join('')}
+        </div>` : emptyState('calendar-x', 'Davomat yozuvlari yo‘q', 'Darslar boshlanganda yozuvlar shu yerda paydo bo‘ladi.');
+
+    return sectionCard('Davomat', summary + byMonth + history, {
+        icon: '<i data-lucide="calendar-check"></i>',
+        sub: att.total ? `${att.percent}% · ${att.present}/${att.total} kun` : 'Hali yozuv yo‘q',
+    });
+}
+
+/** Kurslar bo‘yicha natija. */
+function parentCoursesCard(courses) {
+    const body = courses.length === 0
+        ? emptyState('book-open', 'Kurslar boshlanmagan', 'Bola kursga yozilgach natijalar shu yerda ko‘rinadi.')
+        : `<div class="stack-sm">
+            ${courses.map(c => `
+                <div class="card card-pad" style="box-shadow:none;border:1px solid var(--border)">
+                    <div class="d-flex items-center justify-between gap-3 mb-3">
+                        <div class="fw-7 t-sm truncate" style="min-width:0">${esc(c.title)}</div>
+                        <span class="badge ${c.percent >= 100 ? 'badge-green' : c.percent > 0 ? 'badge-blue' : ''}">${c.percent}%</span>
+                    </div>
+                    ${progressBar(c.percent, c.percent >= 80 ? 'green' : c.percent > 0 ? '' : 'amber')}
+                    <div class="t-xs mt-2">${c.completed}/${c.totalLessons} dars yakunlangan</div>
+                </div>`).join('')}
+        </div>`;
+
+    return sectionCard('Kurslar', body, {
+        icon: '<i data-lucide="book-open"></i>',
+        sub: `${courses.length} ta kurs`,
+    });
+}
+
+window.__parentAttFilter = (st, btn) => {
+    document.querySelectorAll('#p-att-filters .btn').forEach(b => {
+        b.classList.remove('btn-primary');
+        b.classList.add('btn-outline');
+    });
+    btn.classList.add('btn-primary');
+    btn.classList.remove('btn-outline');
+    document.querySelectorAll('#p-att-list > .list-row').forEach(row => {
+        row.classList.toggle('hidden', !(st === 'all' || row.dataset.st === st));
+    });
+};
 
 // ══════════════════════════════════════════════════════════════════════
 //  Views: courses

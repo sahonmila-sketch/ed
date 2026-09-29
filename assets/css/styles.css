@@ -101,9 +101,9 @@
     --t-slow: .4s;
 
     /* Layout */
-    --sidebar-w: 268px;
+    --sidebar-w: 276px;
     --topbar-h: 62px;
-    --bottomnav-h: 64px;
+    --bottomnav-h: 68px;
     --page-max: 1360px;
 }
 
@@ -600,7 +600,11 @@ i[data-lucide] { display: inline-flex; }
 }
 .progress-bar.accent { background: var(--grad-accent); }
 .progress-bar.green { background: var(--green-500); }
+.progress-bar.amber { background: var(--amber-500); }
 .progress-bar.red { background: var(--red-500); }
+/* O'sish animatsiyasi — panel ochilganda foiz 0 dan kerakli qiymatga */
+@keyframes barGrow { from { transform: scaleX(0); } }
+.progress-bar { transform-origin: left center; animation: barGrow .7s var(--ease-out) both; }
 .progress.sm { height: 5px; }
 .progress.lg { height: 11px; }
 
@@ -698,78 +702,105 @@ i[data-lucide] { display: inline-flex; }
 /* ── 14. App shell ─────────────────────────────────────────────────────── */
 .app-sidebar {
     position: fixed; inset: 0 auto 0 0; z-index: 90;
-    width: 290px; max-width: 86vw;
+    width: var(--sidebar-w); max-width: 86vw;
     display: flex; flex-direction: column;
-    background: var(--navy-950);
-    color: #cbd5e1;
+    background: var(--surface);
+    color: var(--text);
+    border-right: 1px solid var(--border);
+    box-shadow: 1px 0 0 rgba(15, 23, 42, .02);
     transform: translateX(-100%);
     transition: transform var(--t-slow) var(--ease-out);
     will-change: transform;
 }
-.app-sidebar.is-open { transform: translateX(0); box-shadow: 0 0 60px rgba(0, 0, 0, .5); }
+.app-sidebar.is-open { transform: translateX(0); box-shadow: 24px 0 60px -20px rgba(15, 23, 42, .3); }
 
 .sb-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 18px 18px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, .07);
+    border-bottom: 1px solid var(--border);
 }
 .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .brand-mark {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 40px; height: 40px; flex: none;
+    width: 42px; height: 42px; flex: none;
     border-radius: 13px;
-    background: var(--grad-brand);
-    color: #fff;
-    box-shadow: 0 6px 18px -6px rgba(37, 99, 235, .7);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 4px 14px -6px rgba(15, 23, 42, .22);
+    overflow: hidden;
+    transition: transform var(--t) var(--ease-out), box-shadow var(--t) var(--ease);
 }
-.brand-mark svg { width: 21px; height: 21px; }
-.brand-name { font-size: 1.0625rem; font-weight: 900; color: #fff; letter-spacing: -.02em; }
-.brand-sub  { font-size: .625rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: #64748b; }
+.brand:hover .brand-mark { transform: translateY(-1px) scale(1.03); box-shadow: 0 8px 20px -8px rgba(15, 23, 22, .3); }
+.brand-mark svg { width: 21px; height: 21px; color: var(--primary); }
+/* Logotip 387x295 (gorizontal) — kvadrat plitkaga sig'diriladi.
+   `contain` + padding: chetlaridagi qora fon allaqachon kesib tashlangan. */
+.brand-mark img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    padding: 6px 5px;
+    display: block;
+}
+.brand-name { font-size: 1.0625rem; font-weight: 900; color: var(--gray-900); letter-spacing: -.02em; }
+.brand-sub  { font-size: .625rem; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: var(--gray-400); }
 
 .sb-nav { flex: 1; overflow-y: auto; padding: 14px 12px 18px; }
-.sb-nav::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .14); background-clip: content-box; }
+.sb-nav::-webkit-scrollbar-thumb { background: var(--gray-200); background-clip: content-box; }
+.sb-nav::-webkit-scrollbar-thumb:hover { background: var(--gray-300); background-clip: content-box; }
 
 .sb-section {
     padding: 14px 12px 6px;
     font-size: .625rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
-    color: #475569;
+    color: var(--gray-400);
 }
 
 .nav-link {
     display: flex; align-items: center; gap: 12px;
     padding: 10px 12px; margin-bottom: 2px;
     border-radius: var(--r-md);
-    color: #94a3b8; font-size: .875rem; font-weight: 600;
-    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+    color: var(--gray-600); font-size: .875rem; font-weight: 600;
+    transition: background var(--t) var(--ease), color var(--t) var(--ease),
+                transform var(--t) var(--ease-out);
     position: relative;
 }
 .nav-link svg { width: 19px; height: 19px; flex: none; }
-.nav-link:hover { background: rgba(255, 255, 255, .06); color: #fff; }
-.nav-link.active { background: rgba(37, 99, 235, .22); color: #fff; }
+.nav-link:hover { background: var(--blue-50); color: var(--primary); transform: translateX(2px); }
+.nav-link.active { background: var(--blue-50); color: var(--primary-dark); font-weight: 700; }
+.nav-link.active svg { color: var(--primary); }
 .nav-link.active::before {
     content: ''; position: absolute; left: -12px; top: 50%;
     transform: translateY(-50%);
     width: 3px; height: 22px; border-radius: 0 3px 3px 0; background: var(--orange-500);
 }
-.nav-link.danger { color: #f87171; }
-.nav-link.danger:hover { background: rgba(239, 68, 68, .14); color: #fca5a5; }
+.nav-link.danger { color: var(--red-600); }
+.nav-link.danger:hover { background: var(--red-50); color: var(--red-700); }
 
-.sb-foot { padding: 12px; border-top: 1px solid rgba(255, 255, 255, .07); }
+.sb-foot { padding: 12px; border-top: 1px solid var(--border); }
 .sb-user {
     display: flex; align-items: center; gap: 11px;
     padding: 10px; border-radius: var(--r-md);
-    background: rgba(255, 255, 255, .05);
-    transition: background var(--t) var(--ease);
+    background: var(--surface-2);
+    transition: background var(--t) var(--ease), transform var(--t) var(--ease-out);
     width: 100%; text-align: left;
 }
-.sb-user:hover { background: rgba(255, 255, 255, .1); }
+.sb-user:hover { background: var(--blue-50); transform: translateY(-1px); }
 .sb-user .avatar { background: var(--grad-accent); }
-.sb-user-name { font-size: .875rem; font-weight: 700; color: #fff; }
-.sb-user-role { font-size: .625rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #64748b; }
+.sb-user-name { font-size: .875rem; font-weight: 700; color: var(--gray-900); }
+.sb-user-role { font-size: .625rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--gray-400); }
+
+/* Yopish tugmasi — oq fonda to'q ikonka */
+.sb-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; flex: none;
+    border-radius: var(--r-md);
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--gray-500);
+    transition: background var(--t) var(--ease), color var(--t) var(--ease);
+}
+.sb-close:hover { background: var(--gray-100); color: var(--gray-900); }
+.sb-close svg { width: 18px; height: 18px; }
 
 .sb-overlay {
     position: fixed; inset: 0; z-index: 85;
-    background: rgba(11, 18, 32, .55);
+    background: rgba(15, 23, 42, .45);
     backdrop-filter: blur(3px);
     -webkit-backdrop-filter: blur(3px);
     opacity: 0; pointer-events: none;
@@ -791,6 +822,35 @@ i[data-lucide] { display: inline-flex; }
 .app-topbar .brand-name { color: var(--gray-900); }
 .app-topbar .brand-sub { display: none; }
 
+/* Foydalanuvchi chiplari (ism + rol) — oq fonda TO'Q rang.
+   Avval bu sidebar'da oq rang bilan yozilgan edi; sidebar oqaga
+   o'tgach o'zi ham, topbar'dagi chip ham `sb-user-*` klasslarini
+   ishlatadi, shuning uchun o'z ranglarimizni beramiz. */
+.tb-user {
+    display: flex; align-items: center; gap: 9px;
+    padding: 5px 10px 5px 5px;
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    max-width: 190px;
+    transition: background var(--t) var(--ease), border-color var(--t) var(--ease),
+                transform var(--t) var(--ease-out);
+}
+.tb-user:hover { background: var(--blue-50); border-color: var(--blue-200); transform: translateY(-1px); }
+.tb-user-name { font-size: .8125rem; font-weight: 700; color: var(--gray-900); line-height: 1.15; }
+.tb-user-role { font-size: .625rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--gray-400); line-height: 1.15; }
+.tb-user svg { width: 15px; height: 15px; color: var(--gray-400); flex: none; }
+/* Tor ekranlarda rol va strelka yashiriladi, lekin ISM ko'rinadi —
+   foydalanuvchi kimligi panelda doim ko'rinib tursin. */
+@media (max-width: 430px) {
+    .tb-user-role, .tb-user > svg { display: none; }
+    .tb-user { max-width: 128px; padding: 5px 10px 5px 5px; }
+}
+@media (max-width: 340px) {
+    .tb-user-name { display: none; }
+    .tb-user { max-width: none; padding: 5px; }
+}
+
 .app-main {
     min-height: 100dvh;
     display: flex; flex-direction: column;
@@ -807,28 +867,52 @@ i[data-lucide] { display: inline-flex; }
 .app-bottomnav {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
     display: flex; align-items: stretch;
-    background: rgba(255, 255, 255, .94);
-    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    background: rgba(255, 255, 255, .92);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
     border-top: 1px solid var(--border);
     padding-bottom: env(safe-area-inset-bottom);
-    box-shadow: 0 -4px 20px rgba(15, 23, 42, .05);
+    box-shadow: 0 -6px 24px -12px rgba(15, 23, 42, .18);
 }
+/* Faol element foni va oraliq chiziq — ikkalasi ham kerak edi, ilgari
+   faqat tepadagi chiziq bor edi va tanlangan element ajralib turmasdi. */
 .app-bottomnav a {
-    position: relative; flex: 1;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    position: relative; flex: 1 1 0; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
     min-height: var(--bottomnav-h);
-    padding: 6px 2px;
+    padding: 8px 4px 7px;
     color: var(--gray-400); font-size: .625rem; font-weight: 700;
+    letter-spacing: .01em;
     -webkit-tap-highlight-color: transparent;
     transition: color var(--t) var(--ease);
 }
-.app-bottomnav a svg { width: 22px; height: 22px; }
-.app-bottomnav a.active { color: var(--primary); }
-.app-bottomnav a.active::before {
-    content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-    width: 26px; height: 3px; border-radius: 0 0 4px 4px; background: var(--accent);
+.app-bottomnav a > svg {
+    width: 21px; height: 21px;
+    padding: 5px;
+    border-radius: var(--r-md);
+    box-sizing: content-box;
+    transition: background var(--t) var(--ease), transform var(--t) var(--ease-out);
 }
-.app-bottomnav a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-bottomnav a:hover > svg { background: var(--gray-100); }
+.app-bottomnav a:active > svg { transform: scale(.9); }
+.app-bottomnav a.active { color: var(--primary); }
+.app-bottomnav a.active > svg {
+    background: var(--blue-50);
+    color: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: inset 0 0 0 1px var(--blue-100);
+}
+/* Tepadagi apelsin chiziq faol elementning markazida, uning orqasida */
+.app-bottomnav a.active::before {
+    content: ''; position: absolute; top: 0; left: 50%;
+    width: 22px; height: 3px; margin-left: -11px;
+    border-radius: 0 0 4px 4px; background: var(--accent);
+    animation: bnBar var(--t) var(--ease-out);
+}
+@keyframes bnBar { from { transform: scaleX(.2); opacity: 0; } }
+.app-bottomnav a span {
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* Desktop: mobil navigatsiya kerak emas. Bu qoida `.app-bottomnav` va
    `.app-topbar` asosiy qat'iyatidan KEYIN turishi shart — aks holda
@@ -839,6 +923,14 @@ i[data-lucide] { display: inline-flex; }
     .app-main.has-sidebar .app-body { padding-bottom: 48px; }
     .app-topbar { display: none; }
     .app-bottomnav { display: none; }
+
+    /* Ish stolida yopuvchi panel DOIM ko'rinadi. `.app-sidebar` o'zida
+       `translateX(-100%)` bilan yashirilgan, va `.app-topbar` ham yashirilgan
+       bo'lgani uchun menyuni ochish tugmasi ham yo'q edi — natijada 1024px'dan
+       katta ekranda navigatsiya umuman topilmardi, faqat bo'sh joy qolardi. */
+    .app-sidebar { transform: translateX(0); box-shadow: none; }
+    .sb-close { display: none; }
+    .sb-overlay { display: none; }
 }
 
 .notif-badge {
@@ -927,9 +1019,8 @@ i[data-lucide] { display: inline-flex; }
 @media (min-width: 640px) { .modal-foot { padding-bottom: 16px; } .modal-foot .btn { flex: none; } }
 body.modal-open { overflow: hidden; }
 
-@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
-@keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+/* fadeIn / modalIn / fadeUp — 28-bo'limda. */
 
 /* ── 17. Toast ─────────────────────────────────────────────────────────── */
 .toast-stack {
@@ -981,10 +1072,15 @@ body.modal-open { overflow: hidden; }
     animation: markIn .8s cubic-bezier(.34, 1.56, .64, 1) both;
 }
 .splash-mark svg { width: 44px; height: 44px; }
+.splash-mark {
+    background: var(--surface);
+    border: 1px solid rgba(255, 255, 255, .18);
+    box-shadow: 0 24px 60px -18px rgba(11, 18, 32, .8);
+}
+.splash-mark img { width: 100%; height: 100%; object-fit: contain; padding: 12px 10px; display: block; }
 @keyframes markIn { from { opacity: 0; transform: scale(.5) rotate(-14deg); } to { opacity: 1; transform: none; } }
 .splash-title { font-size: 2rem; font-weight: 900; letter-spacing: -.03em; margin-top: 22px; animation: fadeUp .7s .15s var(--ease) both; }
 .splash-tag   { font-size: .6875rem; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: #93c5fd; margin-top: 6px; animation: fadeUp .7s .3s var(--ease) both; }
-@keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .splash-bar { width: 150px; height: 4px; margin-top: 28px; border-radius: 999px; background: rgba(255, 255, 255, .16); overflow: hidden; animation: fadeUp .7s .45s var(--ease) both; }
 .splash-bar i { display: block; width: 40%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #93c5fd, #fb923c); animation: barSlide 1.2s infinite var(--ease); }
 @keyframes barSlide { from { transform: translateX(-110%); } to { transform: translateX(360%); } }
@@ -1042,6 +1138,15 @@ body.modal-open { overflow: hidden; }
     box-shadow: 0 14px 32px -12px rgba(37, 99, 235, .7);
 }
 .auth-mark svg { width: 30px; height: 30px; }
+.auth-mark img { width: 100%; height: 100%; object-fit: contain; padding: 9px 8px; display: block; }
+/* Ro'yxatdan o'tish kartasi — apelsin plitka. Logotipda to'q qismlar bor,
+   shuning uchun plitka oq qoladi, gradient faqat halqasida. */
+.auth-mark.grad-ring {
+    background: var(--surface);
+    border: 2px solid transparent;
+    border-image: linear-gradient(135deg, #f97316, #fb923c) 1;
+    box-shadow: 0 14px 32px -12px rgba(249, 115, 22, .55);
+}
 .auth-title { font-size: 1.5rem; font-weight: 900; text-align: center; letter-spacing: -.03em; }
 .auth-sub { font-size: .875rem; color: var(--text-muted); text-align: center; font-weight: 500; margin-top: 4px; }
 .auth-foot { text-align: center; font-size: .8125rem; color: var(--text-muted); font-weight: 500; }
@@ -1379,7 +1484,47 @@ body.modal-open { overflow: hidden; }
 .fade-in   { animation: fadeIn .3s var(--ease) both; }
 .slide-up  { animation: fadeUp .35s var(--ease-out) both; }
 .zoom-in   { animation: modalIn .26s var(--ease-out) both; }
-.stagger   { animation: fadeUp .4s var(--ease-out) both; }
+
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeUp  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes modalIn { from { opacity: 0; transform: translateY(16px) scale(.98); } to { opacity: 1; transform: none; } }
+
+/* Sahifa ochilishi — `mount()` `.view-enter` sinfini qo'shadi */
+@keyframes viewEnter {
+    from { opacity: 0; transform: translateY(10px) scale(.995); }
+    to   { opacity: 1; transform: none; }
+}
+.view-enter { animation: viewEnter .34s var(--ease-out) both; }
+
+/* Ketma-ket paydo bo'lish: qatorlar bir-birining ortidan chiqadi.
+   `--stagger-i` ni `animateIn()` funksiyasi JS da qo'yadi. */
+@keyframes staggerIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: none; }
+}
+.stagger {
+    animation: staggerIn .38s var(--ease-out) both;
+    animation-delay: calc(var(--stagger-i, 0) * 45ms);
+}
+
+/* Yuklanayotgan joy uchun shimmer (spinner yoniga) */
+.loading-box { position: relative; overflow: hidden; }
+.loading-box::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(37, 99, 235, .06), transparent);
+    animation: shimmer 1.5s var(--ease) infinite;
+}
+@keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+.card-hover, .list-row.click, .app-bottomnav a, .nav-link, .btn, .icon-btn, .btn-icon {
+    -webkit-tap-highlight-color: transparent;
+}
+.list-row.click, .card-hover { will-change: transform; }
+@media (hover: hover) {
+    .list-row.click:hover { background: var(--surface-2); }
+    .stat { transition: transform var(--t) var(--ease-out), box-shadow var(--t) var(--ease); }
+    .stat:hover { transform: translateY(-2px); box-shadow: var(--sh-md); }
+}
 
 .ripple { position: absolute; border-radius: 50%; transform: scale(0); background: currentColor; opacity: .18; pointer-events: none; animation: rippleOut .6s var(--ease-out) forwards; }
 .ripple-container { position: relative; overflow: hidden; }
