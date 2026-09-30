@@ -647,9 +647,15 @@ function setShellChrome(on) {
     const header = document.getElementById('mobile-header');
     const main = document.getElementById('main-content');
     const bottom = document.getElementById('mobile-bottom-nav');
+    const sidebar = document.getElementById('sidebar-container');
     if (header) header.classList.toggle('hidden', !on);
     if (main) main.classList.toggle('has-sidebar', on);
     if (bottom) bottom.classList.toggle('hidden', !on);
+    // Ish stolida yon panel doim ko'rinadi (`@media min-width:1024px`), lekin
+    // faqat tizimga kiringandan keyin. Aks holda kirish/ro'yxatdan o'tish
+    // sahifalarida ham yon panel paydo bo'lib qolardi.
+    if (sidebar) sidebar.classList.toggle('is-live', on);
+    if (on) closeSidebar(); else { sidebar?.classList.remove('is-open'); }
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1274,11 +1280,20 @@ function greeting() {
 }
 
 function heroPanel(user, subtitle, extra = '') {
+    // `subtitle` — qator: matn yoki qismlar massivi (nuqta bilan ajratiladi).
+    // Eski variantda butun qator bir xil oq rangda chiqardi va gradient ustida
+    // yozuvdek yo'qotilardi — endi rol och-ko'k, XP esa sariq «chip» bilan ajraladi.
+    const parts = (Array.isArray(subtitle) ? subtitle : [subtitle]).filter(Boolean).map(esc);
+    const hasXp = user.points !== undefined && user.points !== null;
+    const meta = [
+        ...parts.map(p => `<span>${p}</span>`),
+        hasXp ? `<span class="xp"><i data-lucide="zap"></i>${num(user.points)} XP</span>` : '',
+    ].join('<span class="dot"></span>');
     return `
         <div class="hero-panel">
             <div class="hero-kicker"><i data-lucide="sparkles"></i> ${greeting()}</div>
             <h2 class="hero-title">${esc(user.ism)}</h2>
-            <p class="hero-text">${esc(subtitle)}</p>
+            ${meta ? `<div class="hero-text">${meta}</div>` : ''}
             ${extra}
         </div>`;
 }
@@ -1306,17 +1321,10 @@ async function d_student() {
     const attPct = attTotal ? Math.round((present / attTotal) * 100) : 0;
 
     return `
-        ${heroPanel(u, `${roleLabel(u.role)} · ${u.points} XP to‘pladingiz`, `
-            <div class="d-flex items-center gap-3 mt-5 flex-wrap">
-                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff">
-                    <i data-lucide="zap"></i> ${u.points} XP
-                </span>
-                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff">
-                    <i data-lucide="trophy"></i> ${unlocked.length}/${totalAch} yutuq
-                </span>
-                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff">
-                    <i data-lucide="book-open-check"></i> ${s.lessonsDone} dars
-                </span>
+        ${heroPanel(u, [roleLabel(u.role), 'Bugungi kun'], `
+            <div class="hero-badges">
+                <span class="badge"><i data-lucide="trophy"></i> ${unlocked.length}/${totalAch} yutuq</span>
+                <span class="badge hot"><i data-lucide="book-open-check"></i> ${s.lessonsDone} dars</span>
             </div>`)}
 
         <div class="grid grid-4 mt-6">
@@ -1454,7 +1462,7 @@ async function d_ustoz() {
     const myLessons = courses.reduce((a, c) => a + (c.lessons || []).length, 0);
 
     return `
-        ${heroPanel(u, `${roleLabel(u.role)} · ${myGroups.length} guruh · ${students.length} talaba`, `
+        ${heroPanel(u, [roleLabel(u.role), `${myGroups.length} guruh`, `${students.length} talaba`], `
             <div class="d-flex gap-2 mt-5 flex-wrap">
                 <button class="btn btn-white btn-sm" onclick="go('attendance')"><i data-lucide="user-check"></i> Davomat</button>
                 <button class="btn btn-white btn-sm" onclick="go('grades')"><i data-lucide="graduation-cap"></i> Baho qo‘yish</button>
@@ -1541,7 +1549,7 @@ async function d_admin() {
     const openTickets = tickets.filter(t => t.status !== 'Yopilgan');
 
     return `
-        ${heroPanel(STATE.user, `${roleLabel(STATE.user.role)} · platforma boshqaruvi`, `
+        ${heroPanel(STATE.user, [roleLabel(STATE.user.role), 'platforma boshqaruvi'], `
             <div class="d-flex gap-2 mt-5 flex-wrap">
                 <button class="btn btn-white btn-sm" onclick="window.__openUserEditor()"><i data-lucide="user-plus"></i> Foydalanuvchi</button>
                 <button class="btn btn-white btn-sm" onclick="openGroupEditor()"><i data-lucide="users-round"></i> Guruh</button>
@@ -1634,7 +1642,7 @@ async function d_director() {
     const totalXp = students.reduce((a, u) => a + num(u.points), 0);
 
     return `
-        ${heroPanel(STATE.user, `Direktor paneli · ${groups.length} guruh, ${students.length} talaba`, `
+        ${heroPanel(STATE.user, ['Direktor paneli', `${groups.length} guruh`, `${students.length} talaba`], `
             <div class="d-flex gap-2 mt-5 flex-wrap">
                 <button class="btn btn-white btn-sm" onclick="go('reports')"><i data-lucide="bar-chart-3"></i> Hisobotlar</button>
                 <button class="btn btn-white btn-sm" onclick="go('analytics')"><i data-lucide="trending-up"></i> Analitika</button>
@@ -1732,11 +1740,10 @@ async function d_parent() {
     const avg = gs.avg || 0;
 
     return `
-        ${heroPanel(child || { ism: STATE.user.ism }, `${child?.ism || 'Bola'} · ${child?.groupName || 'Guruh birilmagan'}`, `
-            <div class="d-flex gap-2 mt-5 flex-wrap">
-                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="zap"></i> ${child?.points || 0} XP</span>
-                <span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="book-open-check"></i> ${s.lessonsDone} dars</span>
-                ${avg ? `<span class="badge" style="background:rgba(255,255,255,.16);color:#fff"><i data-lucide="graduation-cap"></i> o‘rtacha ${avg}</span>` : ''}
+        ${heroPanel(child || { ism: STATE.user.ism }, [child?.groupName || 'Guruh birilmagan', 'Bola paneli'], `
+            <div class="hero-badges">
+                <span class="badge hot"><i data-lucide="book-open-check"></i> ${s.lessonsDone} dars</span>
+                ${avg ? `<span class="badge"><i data-lucide="graduation-cap"></i> o‘rtacha ${avg}</span>` : ''}
             </div>`)}
 
         <div class="grid grid-4 mt-6">
