@@ -16,7 +16,7 @@ from app import app, db
 from models import (
     User, Group, Course, Lesson, LessonSession, Post, Ticket,
     Attendance, ChatMessage, Notification, Question, Book,
-    Achievement, Setting, LandingData, Grade,
+    Achievement, Setting, LandingData, Grade, ShopItem,
 )
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -234,6 +234,19 @@ BOOKS = [
      'https://covers.openlibrary.org/b/isbn/9781593279929-L.jpg', '#'),
 ]
 
+SHOP_ITEMS = [
+    # (id, nomi, tavsif, emoji, narx(XP), qoldi)
+    (1, 'O‘quv.uz futbolka', 'Yukxoroga yozilgan rasmiy futbolka. O‘lcham: M, L, XL.',
+     '👕', 850, 12),
+    (2, 'O‘quv.uz kalka', 'Yumshoq trikotaj kalka — qish uchun issiq.', '🧣', 600, 20),
+    (3, 'Termos idish', '500 ml, issiqni uzoq turib saqlaydi.', '🍵', 1200, 8),
+    (4, 'O‘quv.uz daftar', 'Qatorli va katta varaqli, 96 varaq.', '📓', 350, 40),
+    (5, 'Qalam va ruchka to‘plami', '5 ta rangli ruchka + qalam.', '✏️', 200, 50),
+    (6, 'Stikerlar to‘plami', 'Yukxoraga mos brend stikerlari (10 dona).', '🌟', 250, 0),
+    (7, 'Kutubxona kitobi', 'Tanlangan kitob PDF formatida.', '📚', 500, 15),
+    (8, '1 oy XP boosted', 'Bir oy davomida kunlik XP ikki barobar.', '⚡', 3000, 5),
+]
+
 ACHIEVEMENTS = [
     ('first_lesson', 'Boshlovchi', '🌱', 'common', 'Birinchi darsni yakunladingiz'),
     ('active_5', 'Faol talaba', '🔥', 'rare', '5 ta darsni muvaffaqiyatli yakunladingiz'),
@@ -296,11 +309,30 @@ def main():
             db.session.add(u)
 
         # --- Группы ---
+        # Недельное расписание: предмет, преподаватель, аудитория.
+        # Формат совпадает с тем, что редактирует openScheduleEditor в app.js.
+        def week_plan(subject_prefix, teacher, room, start_h=8):
+            plan = []
+            subjects = ["Matematika", "Informatika", "O‘zbek tili", "Ingliz tili"]
+            days = ["Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma"]
+            for di, day in enumerate(days):
+                # 3 yoki 2 dars, ketma-ket (1 soat + 15 daqiqa dam)
+                count = 3 if di % 2 == 0 else 2
+                for si, subj in enumerate(subjects[:count]):
+                    h = start_h + di + si * 2          # 08:00, 10:00, 12:00 ...
+                    plan.append({
+                        "day": day,
+                        "time": "%02d:00 — %02d:45" % (h % 24, h % 24),
+                        "subject": f"{subj} ({subject_prefix})" if subject_prefix else subj,
+                        "teacher": teacher,
+                        "room": room,
+                    })
+            return plan
+
         schedules = {
-            1: [{"day": "Dushanba", "time": "14:00"}, {"day": "Chorshanba", "time": "14:00"},
-                {"day": "Juma", "time": "10:00"}],
-            2: [{"day": "Seshanba", "time": "13:00"}, {"day": "Payshanba", "time": "13:00"}],
-            3: [{"day": "Dushanba", "time": "09:00"}],
+            1: week_plan("101", "Alisher Karimov", "A-201", start_h=8),
+            2: week_plan("102", "Nodira Saidova", "B-114", start_h=9),
+            3: week_plan("103", "Bekzod Yusupov", "C-305", start_h=10),
         }
         for gid, name, ustoz, students in GROUPS:
             db.session.add(Group(id=gid, name=name, ustoz_id=ustoz,
@@ -371,6 +403,16 @@ def main():
         for b in BOOKS:
             db.session.add(Book(id=b[0], title=b[1], description=b[2], image=b[3], link=b[4]))
 
+        # --- Magazin tovarlari ---
+        for s in SHOP_ITEMS:
+            row = db.session.get(ShopItem, s[0])
+            if row:
+                row.title, row.description, row.emoji, row.price = s[1], s[2], s[3], s[4]
+                row.stock, row.active = s[5], True
+            else:
+                db.session.add(ShopItem(id=s[0], title=s[1], description=s[2],
+                                        emoji=s[3], price=s[4], stock=s[5], active=True))
+
         # --- Yutuqlar (обновляем существующие) ---
         for a in ACHIEVEMENTS:
             row = db.session.get(Achievement, a[0])
@@ -390,7 +432,7 @@ def main():
         for m, n in ((User, 'users'), (Group, 'groups'), (Course, 'courses'),
                      (Lesson, 'lessons'), (Grade, 'grades'), (Attendance, 'attendance'),
                      (ChatMessage, 'chat'), (Post, 'posts'), (Ticket, 'tickets'),
-                     (Question, 'questions'), (Book, 'books')):
+                     (Question, 'questions'), (Book, 'books'), (ShopItem, 'shop')):
             print(f'    {m.query.count():>4}  {n}')
         print('\n  Login: parol =', PASSWORD)
         for e, r in (('talaba@lms.uz', 'student'), ('ustoz@lms.uz', 'ustoz'),

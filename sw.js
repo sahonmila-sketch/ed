@@ -5,7 +5,7 @@
      • статика (/assets) — stale-while-revalidate
      • /api/*            — мимо кэша полностью (всегда свежие данные)
    ========================================================== */
-const CACHE = 'oquvuz-v37';
+const CACHE = 'oquvuz-v43';
 const SHELL = [
     '/',
     '/index.html',

@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // app.js — O’quv.uz LMS front-end
 // ============================================================
 import { setAuth, getAuthUser, getAuthToken, api_get, api_post, api_patch, api_del } from './modules/api.js';
@@ -41,9 +41,10 @@ window.STATE = STATE;
 
 // Savol turlari: eski versiyalar 'miniGame' yozgan, backend hozir 'mini_game'.
 // Bitta lug'at — qat'iymaslik shu yerda chiqadi.
-const QUIZ_TYPE = (t) => (t === 'miniGame' || t === 'mini' || t === 'game' ? 'mini_game' : (t || 'duel'));
+// Eski "duel" turi olib tashlandi: uning savollari ham o'yin savollari hisoblanadi,
+// aks holda o'yin savol bazasi bo'sh qolib ketardi.
+const QUIZ_TYPE = (t) => (t === 'quiz' ? 'quiz' : 'mini_game');
 const QUIZ_TYPE_LABEL = {
-    duel: 'Duel',
     mini_game: 'Mini o‘yin',
     miniGame: 'Mini o‘yin',
     quiz: 'Test',
@@ -236,6 +237,11 @@ const getParentChild = () => api_get('/parent/child');
 const getParentAtt = () => api_get('/parent/child/attendance');
 const getParentReport = () => api_get('/parent/child/report');
 const getSettingsAPI = () => api_get('/settings');
+const getShop = () => api_get('/shop');
+const getPendingUsers = () => api_get('/users/pending');
+const getMyPurchases = () => api_get('/shop/purchases');
+const setUserStatus = (id, status) => api_patch(`/users/${id}/status`, { status });
+const buyItem = (id) => api_post(`/shop/${id}/buy`, {});
 
 async function loadUserData() {
     if (!getAuthToken()) { STATE.user = null; return null; }
@@ -244,12 +250,25 @@ async function loadUserData() {
         if (!user) { window.removeUserSession(); return null; }
         STATE.user = user;
         localStorage.setItem('lms_user', JSON.stringify(user));
+        loadLessonMinutes();
         return user;
     } catch {
         window.removeUserSession();
         return null;
     }
 }
+
+// Dars uzunligi sozlanadi (standart 20 daqiqa) — bir marta yuklab olamiz
+let __lessonMinLoaded = false;
+async function loadLessonMinutes() {
+    if (__lessonMinLoaded) return;
+    __lessonMinLoaded = true;
+    try {
+        const s = await api_get('/settings');
+        if (s && Number(s.lessonMinutes) > 0) LESSON_NEEDED_SEC = Number(s.lessonMinutes) * 60;
+    } catch { /* standart qiymat qoladi */ }
+}
+window.loadLessonMinutes = loadLessonMinutes;
 
 async function getMyGroup() {
     const groups = await getGroups();
@@ -342,6 +361,7 @@ function showAchievementUnlock(ach) {
 //  Lesson timer
 // ══════════════════════════════════════════════════════════════════════
 const LESSON_REQUIRED_SEC = 20 * 60;
+let LESSON_NEEDED_SEC = LESSON_REQUIRED_SEC;
 let TIMER = { interval: null, sec: 0, active: false, lessonId: null, sessionId: null };
 
 function stopLessonTimer() {
@@ -354,16 +374,24 @@ async function startLessonTimer(lessonId) {
     TIMER = { interval: null, sec: 0, active: true, lessonId };
     const res = await api_post(`/lessons/${lessonId}/start`);
     TIMER.sessionId = res.sessionId;
-    TIMER.interval = setInterval(() => { TIMER.sec++; updateLessonTimerUI(); }, 1000);
+    if (res.requiredSeconds) LESSON_NEEDED_SEC = res.requiredSeconds;
+    TIMER.sec = Math.min(res.alreadySec || 0, LESSON_NEEDED_SEC);
+    TIMER.interval = setInterval(() => {
+        if (updateLessonTimerUI()) return;     // true = vaqt tugadi
+        TIMER.sec++;
+        updateLessonTimerUI();
+    }, 1000);
     updateLessonTimerUI();
 }
 window.startLessonTimer = startLessonTimer;
 
+// true qaytaradi, agar timer endi tugagan bo'lsa (bir marta chaqiriladi)
 function updateLessonTimerUI() {
     const box = document.getElementById('timer-box');
-    if (!box) return;
-    const left = Math.max(0, LESSON_REQUIRED_SEC - TIMER.sec);
+    if (!box) return false;
+    const left = Math.max(0, LESSON_NEEDED_SEC - TIMER.sec);
     const done = left === 0;
+    const wasDone = box.classList.contains('done');
     box.classList.toggle('done', done);
 
     const text = document.getElementById('timer-text');
@@ -372,21 +400,66 @@ function updateLessonTimerUI() {
     const ring = document.getElementById('timer-ring');
     if (ring) {
         const c = 2 * Math.PI * 20;
-        const pct = Math.min(1, TIMER.sec / LESSON_REQUIRED_SEC);
+        const pct = Math.min(1, TIMER.sec / LESSON_NEEDED_SEC);
         ring.style.strokeDasharray = `${c}`;
         ring.style.strokeDashoffset = `${c * (1 - pct)}`;
     }
 
     const msg = document.getElementById('timer-msg');
     const btn = document.getElementById('timer-btn');
+    const lock = document.getElementById('video-lock');
     if (done) {
-        if (msg) msg.innerHTML = '<b>Tayyor!</b> Darsni yakunlashingiz mumkin.';
+        if (msg) msg.innerHTML = '<b>Tayyor!</b> Video ochildi va ball qo‘shildi.';
         if (btn) btn.disabled = false;
+        if (lock) lock.classList.add('open');
+        if (!wasDone) window.__unlockLessonVideo();
     } else {
-        if (msg) msg.innerHTML = `Yakunlash uchun <b>${Math.ceil(left / 60)} daqiqa</b> qoldi.`;
+        if (msg) msg.innerHTML = `Video ochilishi uchun <b>${Math.ceil(left / 60)} daqiqa</b> qoldi.`;
         if (btn) btn.disabled = true;
+        if (lock) {
+            const lb = lock.querySelector('.video-lock-left');
+            if (lb) lb.textContent = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+        }
     }
+    return done && !wasDone;
 }
+
+// Timer tugadi: qufulni ochamiz, videoni ko'rsatamiz va ball qo'shamiz
+window.__unlockLessonVideo = async () => {
+    const lid = TIMER.lessonId;
+    if (!lid || TIMER.unlockedFor === lid) return;
+    TIMER.unlockedFor = lid;
+    stopLessonTimer();
+    try {
+        const res = await completeLessonServer(lid);
+        window.__swapToVideo(lid, res);
+    } catch (e) {
+        showToast(e.message || 'Darsni yakunlab bo‘lmadi', 'error');
+    }
+};
+
+// Video konteynerini "qufuli" holatdan haqiqiy videoga almashtiramiz
+window.__swapToVideo = (lessonId, res) => {
+    const lock = document.getElementById('video-lock');
+    const holder = document.getElementById('video-holder');
+    const url = window.__videoUrls?.[lessonId];
+    if (holder && url && !holder.dataset.ready) {
+        holder.dataset.ready = '1';
+        holder.innerHTML = `
+            <iframe src="${esc(url)}" allowfullscreen
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                    title="Dars videosi"></iframe>`;
+    }
+    if (lock) lock.remove();
+    const box = document.getElementById('timer-box');
+    if (box) box.classList.add('unlocked');
+    if (res && res.xpGained > 0) {
+        const xb = document.getElementById('lesson-xp');
+        if (xb) { xb.innerHTML = `<i data-lucide="zap"></i> +${res.xpGained} XP`; xb.classList.add('show'); safeLucide(xb); }
+    }
+    const btn = document.getElementById('timer-btn');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Darsni yakunlandi deb belgilash'; safeLucide(btn); }
+};
 
 async function completeLessonServer(lessonId) {
     const res = await api_post(`/lessons/${lessonId}/complete`);
@@ -416,8 +489,8 @@ const NAV = {
             group: 'Jamiyat', items: [
                 { view: 'posts', label: 'Postlar', icon: 'newspaper' },
                 { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
-                { view: 'duel', label: 'Duel', icon: 'swords' },
                 { view: 'game', label: 'Mini o‘yin', icon: 'gamepad-2' },
+                { view: 'shop', label: 'Do‘kon', icon: 'shopping-bag' },
                 { view: 'chat', label: 'Guruh chat', icon: 'messages-square' },
                 { view: 'library', label: 'Kutubxona', icon: 'library' },
             ],
@@ -445,7 +518,6 @@ const NAV = {
             group: 'Kommunikatsiya', items: [
                 { view: 'schedule', label: 'Jadval', icon: 'calendar-days' },
                 { view: 'posts', label: 'Postlar', icon: 'newspaper' },
-                { view: 'duel', label: 'Duel', icon: 'swords' },
                 { view: 'game', label: 'Mini o‘yin', icon: 'gamepad-2' },
                 { view: 'staff-chat', label: 'Xodimlar chat', icon: 'messages-square' },
             ],
@@ -463,9 +535,10 @@ const NAV = {
             group: 'Boshqaruv', items: [
                 { view: 'admin-dashboard', label: 'Panel', icon: 'layout-dashboard' },
                 { view: 'users', label: 'Foydalanuvchilar', icon: 'users' },
+                { view: 'pending', label: 'Tasdiqlash', icon: 'user-check' },
                 { view: 'groups', label: 'Guruhlar', icon: 'users-round' },
                 { view: 'courses', label: 'Kurslar', icon: 'book-open' },
-                { view: 'attendance', label: 'Davomat', icon: 'user-check' },
+                { view: 'attendance', label: 'Davomat', icon: 'calendar-check' },
             ],
         },
         {
@@ -473,6 +546,7 @@ const NAV = {
                 { view: 'reports', label: 'Hisobotlar', icon: 'bar-chart-3' },
                 { view: 'posts', label: 'Postlar', icon: 'newspaper' },
                 { view: 'questions', label: 'Savollar', icon: 'list-checks' },
+                { view: 'shop', label: 'Do‘kon', icon: 'shopping-bag' },
                 { view: 'support', label: 'Ticketlar', icon: 'life-buoy' },
                 { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
             ],
@@ -514,8 +588,10 @@ NAV.director = [
     {
         group: 'Monitoring', items: [
             { view: 'users', label: 'Xodimlar va talabalar', icon: 'users' },
+            { view: 'pending', label: 'Tasdiqlash', icon: 'user-check' },
             { view: 'groups', label: 'Guruhlar', icon: 'users-round' },
-            { view: 'attendance', label: 'Davomat', icon: 'user-check' },
+            { view: 'attendance', label: 'Davomat', icon: 'calendar-check' },
+            { view: 'shop', label: 'Do‘kon', icon: 'shopping-bag' },
             { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
         ],
     },
@@ -533,10 +609,10 @@ window.NAV = NAV;
 window.viewsFor = (role) => (NAV[role] || []).flatMap((g) => g.items.map((i) => i.view));
 
 const MOBILE_NAV = {
-    student: ['student-dashboard', 'courses', 'grades', 'chat', 'profile'],
+    student: ['student-dashboard', 'courses', 'grades', 'shop', 'profile'],
     ustoz: ['ustoz-dashboard', 'courses', 'attendance', 'staff-chat', 'profile'],
-    admin: ['admin-dashboard', 'users', 'courses', 'reports', 'profile'],
-    tech_admin: ['admin-dashboard', 'users', 'courses', 'reports', 'profile'],
+    admin: ['admin-dashboard', 'pending', 'users', 'courses', 'profile'],
+    tech_admin: ['admin-dashboard', 'pending', 'users', 'courses', 'profile'],
     director: ['director-dashboard', 'reports', 'analytics', 'users', 'profile'],
     parent: ['parent-dashboard', 'leaderboard', 'notifications', 'support', 'profile'],
 };
@@ -559,9 +635,12 @@ const VIEW_TITLES = {
     groups: 'Guruhlar', attendance: 'Davomat', grades: 'Baholar',
     reports: 'Hisobotlar', analytics: 'Analitika', leaderboard: 'Reyting',
     support: 'Yordam', chat: 'Guruh chat', 'staff-chat': 'Xodimlar chat',
-    library: 'Kutubxona', duel: 'Duel', game: 'Mini o‘yin', questions: 'Savollar',
+    library: 'Kutubxona', game: 'Mini o’yin', questions: 'Savollar',
     schedule: 'Jadval', posts: 'Postlar', profile: 'Profil',
     notifications: 'Bildirishnomalar', settings: 'Sozlamalar',
+// Yangi bo'limlar VIEW_TITLES da bo'lmasa, renderView ularni topa olmaydi
+// va har doim boshqaruv paneliga qaytadi (jimjin o'zgarish kuzatilmaydi).
+shop: 'Do\\u2018kon', pending: 'Tasdiqlash', homework: 'Uy vazifalari',
 };
 
 const ALL_VIEWS = new Set(Object.keys(VIEW_TITLES));
@@ -709,6 +788,15 @@ async function renderView(view) {
     renderSidebar();
     renderMobileNav();
 
+    // Ro'yxatdan o'tgan, lekin admin tasdiqlagancha kirish mumkin emas
+    if (isAwaitingApproval() && view !== 'pending') {
+        area.innerHTML = pendingGate();
+        safeLucide(area);
+        animateIn(area);
+        updateNotifBadges();
+        return;
+    }
+
     const renderer = VIEWS[view];
     if (!renderer) {
         area.innerHTML = emptyState('compass', 'Sahifa topilmadi');
@@ -733,11 +821,65 @@ async function renderView(view) {
     updateNotifBadges();
 }
 
+// ─── "Kutilmoqda" eshigi: status pending/rejected ─────────────────────
+function isAwaitingApproval() {
+    const s = STATE.user?.status;
+    return s === 'pending' || s === 'rejected';
+}
+
+function pendingGate() {
+    const u = STATE.user || {};
+    const rejected = u.status === 'rejected';
+    return `
+    <div class="gate">
+        <div class="gate-card">
+            <div class="gate-glow"></div>
+            <div class="gate-icon">${rejected ? '🚫' : '⏳'}</div>
+            <h1 class="t-2xl fw-9 mt-4">${rejected ? 'Ariza rad etildi' : 'Tasdiqlash kutilmoqda'}</h1>
+            <p class="c-muted mt-3" style="max-width:32rem;margin-inline:auto">
+                ${rejected
+                    ? 'Afvuz, admingiz arizangizni rad etdi. Savollaringiz bo‘lsa, kollej administratoriga murojaat qiling.'
+                    : 'Ro‘yxatdan o‘tdingiz! Administrator hisobingizni tasdiqlashini kutilmoqda. Tasdiqlangach barcha bo‘limlar ochiladi.'}
+            </p>
+            <div class="gate-info">
+                <div><i data-lucide="user"></i><span>${esc(u.ism || '')}</span></div>
+                <div><i data-lucide="mail"></i><span>${esc(u.email || '')}</span></div>
+                <div><i data-lucide="shield-check"></i><span>${esc(roleLabel(u.role))}</span></div>
+            </div>
+            <div class="d-flex gap-2 justify-center mt-6 flex-wrap">
+                <button class="btn btn-outline" onclick="window.__refreshStatus()">
+                    <i data-lucide="refresh-cw"></i> Holatni tekshirish
+                </button>
+                <button class="btn btn-primary" onclick="window.logout()">
+                    <i data-lucide="log-out"></i> Chiqish
+                </button>
+            </div>
+            <div class="gate-note"><i data-lucide="clock"></i> Tasdiqlash odatda bir necha daqiqa ichida amalga oshadi</div>
+        </div>
+    </div>`;
+}
+
+window.__refreshStatus = async () => {
+    const btn = document.querySelector('#dynamic-view-area .btn-outline');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Tekshirilmoqda…'; safeLucide(btn); }
+    const u = await loadUserData();
+    if (u && !isAwaitingApproval()) {
+        showToast('Hisobingiz tasdiqlandi! Xush kelibsiz 🎉', 'success');
+        window.location.hash = DASHBOARD_VIEW[u.role] || 'courses';
+        renderView(DASHBOARD_VIEW[u.role] || 'courses');
+    } else if (u?.status === 'rejected') {
+        showToast('Ariza rad etildi', 'error');
+        renderView(STATE.view || 'home');
+    } else {
+        showToast('Hali tasdiqlanmagan', 'info');
+        renderView(STATE.view || 'home');
+    }
+};
+
 /**
  * Некоторые разделы сначала рисуют «каркас», а данные подгружают отдельно —
  * иначе контейнер остаётся пустым. Здесь запускаем их после вставки HTML.
- */
-const AFTER_RENDER = {
+ */const AFTER_RENDER = {
     courses: () => loadCoursesGrid(),
     posts: () => loadPosts(),
     support: () => loadTickets(),
@@ -792,6 +934,11 @@ async function openLessonModal(lessonId) {
 
     const done = courseCompleted(course).includes(lesson.id);
     const siblings = course.lessons || [];
+    const hasVideo = !!lesson.videoUrl;
+    const mins = LESSON_NEEDED_SEC / 60;
+    TIMER.unlockedFor = done ? lesson.id : null;
+    window.__videoUrls = window.__videoUrls || {};
+    if (hasVideo) window.__videoUrls[lesson.id] = lesson.videoUrl;
 
     openModal(modalShell({
         icon: '<i data-lucide="play-circle"></i>',
@@ -799,12 +946,18 @@ async function openLessonModal(lessonId) {
         sub: course.title,
         body: `
             <div class="stack">
+                ${!done ? `
                 <div class="callout blue">
                     <i data-lucide="info"></i>
-                    <div>Darsni yakunlash uchun kamida <b>20 daqiqa</b> vaqt sarflashingiz kerak.
+                    <div>Video <b>${mins} daqiqa</b> davomida darsni ko‘rib turishdan keyin ochiladi.
                     Timer brauzerni yopsangiz ham to‘xtaydi — oynani yopmang.</div>
-                </div>
+                </div>` : `
+                <div class="callout green">
+                    <i data-lucide="check-circle-2"></i>
+                    <div>Bu dars siz tomonidan <b>yakunlangan</b>. Video ochiq, qayta ko‘rishingiz mumkin.</div>
+                </div>`}
 
+                ${!done ? `
                 <div class="timer-box" id="timer-box">
                     <div class="timer-ring-wrap">
                         <svg class="timer-ring" viewBox="0 0 48 48">
@@ -815,17 +968,29 @@ async function openLessonModal(lessonId) {
                         <div class="timer-text" id="timer-text">00:00</div>
                     </div>
                     <div class="grow">
-                        <div class="fw-8" style="font-size:.875rem">Dars vaqti</div>
-                        <div class="timer-msg" id="timer-msg">Yakunlash uchun <b>20 daqiqa</b> qoldi.</div>
+                        <div class="fw-8" style="font-size:.875rem">Darsni ko‘rish vaqti</div>
+                        <div class="timer-msg" id="timer-msg">Video ochilishi uchun <b>${mins} daqiqa</b> qoldi.</div>
+                        <div class="lesson-xp-chip" id="lesson-xp"><i data-lucide="zap"></i></div>
                     </div>
-                </div>
-
-                ${lesson.videoUrl ? `
-                <div class="video-box">
-                    <iframe src="${esc(lesson.videoUrl)}" allowfullscreen
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
-                            title="${esc(lesson.title)}"></iframe>
                 </div>` : ''}
+
+                ${hasVideo ? `
+                <div class="video-holder" id="video-holder" ${done ? 'data-ready="1"' : ''}>
+                    ${done ? `<iframe src="${esc(lesson.videoUrl)}" allowfullscreen
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                            title="${esc(lesson.title)}"></iframe>` : ''}
+                </div>
+                ${done ? '' : `
+                <div class="video-lock" id="video-lock">
+                    <div class="video-lock-blur"></div>
+                    <div class="video-lock-body">
+                        <div class="video-lock-icon"><i data-lucide="lock"></i></div>
+                        <b>Video yopiq</b>
+                        <span>Darsni <span class="video-lock-left">${String(mins).padStart(2, '0')}:00</span> davomida
+                              ko‘rib turing — video avtomatik ochiladi</span>
+                    </div>
+                </div>`}`
+                : lesson.content ? `<div class="callout amber"><i data-lucide="file-text"></i><div>Bu darsda video yo‘q, faqat o‘qish materiali bor.</div></div>` : ''}
 
                 ${lesson.topic ? `<div class="badge badge-orange">${esc(lesson.topic)}</div>` : ''}
                 ${lesson.content ? `<div class="prose">${esc(lesson.content)}</div>` : ''}
@@ -847,19 +1012,218 @@ async function openLessonModal(lessonId) {
             </div>`,
         footer: `
             <button class="btn btn-outline" onclick="cModal()">Yopish</button>
-            <button class="btn btn-success" id="timer-btn" onclick="window.__completeLesson(${lesson.id})" disabled>
-                <i data-lucide="check"></i> Darsni yakunlash
+            <button class="btn btn-success" id="timer-btn" onclick="window.__completeLesson(${lesson.id})" ${done ? '' : 'disabled'}>
+                <i data-lucide="check"></i> ${done ? 'Qayta ko‘rish' : 'Darsni yakunlash'}
             </button>`,
     }), 'lg');
 
     if (done) {
         const btn = document.getElementById('timer-btn');
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="refresh-cw"></i> Qayta ko‘rish'; btn.onclick = () => { cModal(); }; }
+        if (btn) btn.onclick = () => cModal();
     } else {
         try { await startLessonTimer(lesson.id); } catch (e) { showToast(e.message, 'error'); }
     }
 }
 window.openLessonModal = openLessonModal;
+// ══════════════════════════════════════════════════════════════════════
+//  Views: do'kon (ballar -> sovg'alar) va tasdiqlash
+// ══════════════════════════════════════════════════════════════════════
+const SHOP_TONES = ['blue', 'orange', 'violet', 'green', 'amber', 'pink'];
+
+function shopHistoryCard(rows) {
+    if (!rows || !rows.length) return '';
+    return sectionCard('Xaridlarim', `
+        <div class="table-wrap">
+            <table class="table responsive">
+                <thead><tr><th data-label="Sovga">Sovga</th><th data-label="Narxi">Narxi</th><th data-label="Sana">Sana</th></tr></thead>
+                    <tbody>
+                        ${rows.map(r => {
+                            const d = r.createdAt ? new Date(r.createdAt) : null;
+                            const when = (d && !isNaN(d))
+                                ? d.toLocaleDateString('uz-UZ', { day: '2-digit', month: '2-digit', year: '2-digit' })
+                                  + ' ' + d.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' })
+                                : '—';
+                    return `<tr>
+                        <td data-label="Sovga"><span class="cell-main">${esc(r.title || '—')}</span></td>
+                        <td data-label="Narxi"><span class="shop-price"><i data-lucide="zap"></i> ${num(r.price)}</span></td>
+                        <td data-label="Sana"><span class="cell-sub">${when}</span></td>
+                    </tr>`;
+                }).join('')}
+            </tbody>
+        </table>
+    </div>`, { actions: `<span class="badge badge-blue">${rows.length} ta</span>` });
+}
+
+async function v_shop() {
+    const items = await getShop();
+    const my = num(STATE.user?.points);
+    const canEdit = ['admin', 'tech_admin', 'director'].includes(STATE.user?.role);
+    const isBuyer = !canEdit;
+
+    // Tarix yuklanishi do‘kon ochilishini kechiktirmasligi kerak.
+    let history = [];
+    if (isBuyer) {
+        try { history = (await getMyPurchases()) || []; }
+        catch (e) { history = []; }
+    }
+
+    return `
+        ${pageHead('Do‘kon', 'Ballarni sovg‘alarga almashtiring', `
+            <div class="d-flex gap-2 flex-wrap">
+                <span class="badge badge-orange"><i data-lucide="zap"></i> ${my} XP</span>
+                ${canEdit ? `<button class="btn btn-primary" onclick="window.__openShopEditor()"><i data-lucide="plus"></i> Tovar qo‘shish</button>` : ''}
+            </div>`)}
+
+        ${items.length === 0 ? emptyState('shopping-bag', 'Do‘kon bo‘sh', 'Tovarlarni administrator qo‘shadi.')
+            : `<div class="shop-grid">
+                ${items.map((it, idx) => {
+                    const tone = SHOP_TONES[idx % SHOP_TONES.length];
+                    const out = it.stock === 0;
+                    const afford = my >= it.price;
+                    return `
+                    <article class="shop-card tone-${tone}${it.active ? '' : ' off'}">
+                        <div class="shop-media">
+                            ${it.image
+                                ? `<img src="${esc(it.image)}" alt="${esc(it.title)}" loading="lazy">`
+                                : `<span class="shop-emoji">${esc(it.emoji || '🎁')}</span>`}
+                            ${out ? '<span class="shop-out">Tugagan</span>' : ''}
+                            ${it.owned ? `<span class="shop-owned"><i data-lucide="check"></i> ${it.owned} dona</span>` : ''}
+                        </div>
+                        <div class="shop-body">
+                            <h3 class="shop-title">${esc(it.title)}</h3>
+                            <p class="shop-desc clamp-2">${esc(it.description || 'Tavsif kiritilmagan')}</p>
+                            <div class="shop-foot">
+                                <span class="shop-price"><i data-lucide="zap"></i> ${num(it.price)}</span>
+                                ${it.stock ? `<span class="shop-stock">${it.stock} qoldi</span>` : '<span class="shop-stock">chekisiz</span>'}
+                            </div>
+                            ${isBuyer ? `
+                            <button class="btn ${afford && !out ? 'btn-primary' : 'btn-soft'} w-full mt-3"
+                                    ${out || !afford || !it.active ? 'disabled' : ''}
+                                    onclick="window.__buyShop(${it.id},this)">
+                                <i data-lucide="shopping-cart"></i>
+                                ${out ? 'Tugagan' : afford ? 'Sotib olish' : `Yana ${num(it.price - my)} XP kerak`}
+                            </button>`
+                                : `<div class="d-flex gap-2 mt-3">
+                                    <button class="btn btn-soft grow" onclick="window.__openShopEditor(${it.id})"><i data-lucide="pencil"></i></button>
+                                    <button class="btn-icon sm" onclick="window.__delShop(${it.id})" aria-label="O‘chirish"><i data-lucide="trash-2"></i></button>
+                                </div>`}
+                        </div>
+                    </article>`;
+                }).join('')}
+            </div>`}
+
+        <div id="shop-history" class="mt-6">${shopHistoryCard(history)}</div>`;
+}
+
+window.__buyShop = async (id, btn) => {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Olib kelinmoqda…'; }
+    try {
+        const res = await buyItem(id);
+        STATE.user.points = res.points;
+        localStorage.setItem('lms_user', JSON.stringify(STATE.user));
+        updateHeaderUser();
+        showToast(res.message, 'success');
+        renderView('shop');
+    } catch (e) {
+        showToast(e.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="shopping-cart"></i> Sotib olish'; }
+    }
+};
+
+window.__delShop = async (id) => {
+    if (!confirm('Tovarni o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/shop/${id}`); showToast('Tovar o‘chirildi', 'success'); renderView('shop'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__openShopEditor = async (id) => {
+    const items = id ? await getShop() : [];
+    const it = items.find(x => x.id === id) || {};
+    openModal(modalShell({
+        icon: '<i data-lucide="shopping-bag"></i>',
+        title: id ? 'Tovarni tahrirlash' : 'Yangi tovar',
+        body: `
+            <form id="form-shop" class="stack" data-id="${id || ''}" onsubmit="return window.__svShop(event)">
+                <div class="field"><label class="label">Nomi</label>
+                    <input class="input" name="title" required value="${esc(it.title || '')}" placeholder="O‘quv.uz futbolka"></div>
+                <div class="field"><label class="label">Tavsif</label>
+                    <textarea class="textarea" name="description" placeholder="Qisqacha izoh">${esc(it.description || '')}</textarea></div>
+                <div class="grid grid-2 gap-3">
+                    <div class="field"><label class="label">Narxi (XP)</label>
+                        <input class="input" name="price" type="number" min="0" required value="${num(it.price ?? 500)}"></div>
+                    <div class="field"><label class="label">Qoldi (0 = cheksiz)</label>
+                        <input class="input" name="stock" type="number" min="0" value="${num(it.stock ?? 10)}"></div>
+                </div>
+                <div class="grid grid-2 gap-3">
+                    <div class="field"><label class="label">Emoji (rasmsiz)</label>
+                        <input class="input" name="emoji" maxlength="4" value="${esc(it.emoji || '')}" placeholder="👕"></div>
+                    <div class="field"><label class="label">Rasm havolasi</label>
+                        <input class="input" name="image" value="${esc(it.image || '')}" placeholder="https://…"></div>
+                </div>
+                <label class="check"><input type="checkbox" name="active" ${it.active === false ? '' : 'checked'}>
+                    <span>Sotuvda (faqat shu holda ko‘rinadi)</span></label>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-shop').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash</button>`,
+    }));
+};
+
+window.__svShop = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+        title: fd.get('title'), description: fd.get('description'),
+        price: Number(fd.get('price') || 0), stock: Number(fd.get('stock') || 0),
+        emoji: (fd.get('emoji') || '').trim(), image: (fd.get('image') || '').trim(),
+        active: fd.get('active') === 'on',
+    };
+    const id = e.target.dataset.id;
+    try {
+        if (id) await api_patch(`/shop/${id}`, payload); else await api_post('/shop', payload);
+        showToast('Tovar saqlandi', 'success');
+        cModal();
+        renderView('shop');
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+// Yetkazib berilmagan hisoblar: "tasdiqlash" ekrani
+async function v_pending() {
+    const list = await getPendingUsers();
+    return `
+        ${pageHead('Tasdiqlash', `${list.length} ta foydalanuvchi kutilmoqda`, `
+            <button class="btn btn-outline" onclick="renderView('pending')"><i data-lucide="refresh-cw"></i> Yangilash</button>`)}
+
+        ${list.length === 0
+            ? emptyState('user-check', 'Hammasi tasdiqlangan', 'Yangi ro‘yxatdan o‘tgan foydalanuvchilar shu yerda paydo bo‘ladi.')
+            : `<div class="stack-sm">
+                ${list.map(u => `
+                <div class="card card-pad d-flex items-center gap-3" style="flex-wrap:wrap">
+                    <div class="avatar" style="width:44px;height:44px;font-size:1.05rem">${esc((u.ism || '?').charAt(0))}</div>
+                    <div class="grow" style="min-width:0">
+                        <div class="fw-8">${esc(u.ism)}</div>
+                        <div class="c-muted" style="font-size:.8125rem">${esc(u.email)} · ${esc(roleLabel(u.role))}</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" onclick="window.__setStatus(${u.id},'active')">
+                            <i data-lucide="check"></i> Tasdiqlash</button>
+                        <button class="btn btn-outline btn-sm" onclick="window.__setStatus(${u.id},'rejected')">
+                            <i data-lucide="x"></i> Rad etish</button>
+                    </div>
+                </div>`).join('')}
+            </div>`}`;
+}
+
+window.__setStatus = async (id, status) => {
+    try {
+        await setUserStatus(id, status);
+        showToast(status === 'active' ? 'Foydalanuvchi tasdiqlandi' : 'Foydalanuvchi rad etildi', 'success');
+        renderView('pending');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
 window.__openLesson = (id) => { closeSidebar(); openLessonModal(id); };
 window.__completeLesson = async (id) => {
     const btn = document.getElementById('timer-btn');
@@ -1089,8 +1453,7 @@ function openQuestionEditor(q = null) {
                     <div class="field">
                         <label class="label">Turi</label>
                         <select class="select" name="type">
-                            <option value="duel" ${(q?.type || 'duel') === 'duel' ? 'selected' : ''}>Duel</option>
-                            <option value="mini_game" ${QUIZ_TYPE[q?.type] === 'mini_game' ? 'selected' : ''}>Mini o‘yin</option>
+                            <option value="mini_game" ${(q?.type === 'quiz') ? '' : 'selected'}>Mini o‘yin</option>
                             <option value="quiz" ${q?.type === 'quiz' ? 'selected' : ''}>Test</option>
                         </select>
                     </div>
@@ -1210,49 +1573,82 @@ window.__delGroup = async (id) => {
 
 // ─── Schedule editor ───────────────────────────────────────────────────
 const DAYS = ['Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba'];
+const todayDayName = () => DAYS[(new Date().getDay() + 6) % 7] || DAYS[0];
 
 window.openScheduleEditor = async (group) => {
     if (!group) { showToast('Guruhni avval tanlang', 'error'); return; }
-    const draft = JSON.parse(JSON.stringify(group.schedule || []));
+    const draft = JSON.parse(JSON.stringify(group.schedule || []))
+        .filter(s => s && (s.day || s.time || s.subject));
 
     const draw = () => {
         const box = document.getElementById('sched-rows');
+        if (!box) return;
         box.innerHTML = draft.length === 0
-            ? '<div class="form-hint">Jadval bo‘sh</div>'
+            ? '<div class="sched-empty-box"><i data-lucide="calendar-plus"></i><b>Hafta jadvali bo‘sh</b><span>Pastdagi tugma bilan birinchi darsni qo‘shing</span></div>'
             : draft.map((s, i) => `
-            <div class="card card-pad-sm" style="border-style:dashed">
-                <div class="d-flex items-center justify-between mb-2">
-                    <span class="badge badge-orange">${esc(s.day || 'Kun')}</span>
-                    <button type="button" class="btn-icon sm" onclick="window.__rmSched(${i})"><i data-lucide="trash-2"></i></button>
+            <div class="sched-edit-row">
+                <div class="sched-edit-grid">
+                    <select class="input" onchange="window.__schedDraft[${i}].day=this.value">
+                        <option value="">— kun —</option>
+                        ${DAYS.map(d => `<option ${d === s.day ? 'selected' : ''}>${d}</option>`).join('')}
+                    </select>
+                    <input class="input" placeholder="09:00 — 10:30" value="${esc(s.time || '')}"
+                           oninput="window.__schedDraft[${i}].time=this.value">
                 </div>
-                <div class="stack-sm">
-                    <input class="input" placeholder="Kun (Dushanba, Chorshanba…)" value="${esc(s.day || '')}" oninput="window.__schedDraft[${i}].day=this.value">
-                    <input class="input" placeholder="Vaqt (09:00 — 10:30)" value="${esc(s.time || '')}" oninput="window.__schedDraft[${i}].time=this.value">
-                    <input class="input" placeholder="Fan / mashg‘ulot" value="${esc(s.subject || '')}" oninput="window.__schedDraft[${i}].subject=this.value">
+                <input class="input mt-2" placeholder="Fan yoki mashg‘ulot nomi" value="${esc(s.subject || '')}"
+                       oninput="window.__schedDraft[${i}].subject=this.value">
+                <div class="sched-edit-grid mt-2">
+                    <input class="input" placeholder="O‘qituvchi" value="${esc(s.teacher || '')}"
+                           oninput="window.__schedDraft[${i}].teacher=this.value">
+                    <input class="input" placeholder="Xona / auditoriya" value="${esc(s.room || '')}"
+                           oninput="window.__schedDraft[${i}].room=this.value">
                 </div>
+                <button type="button" class="btn-icon sm sched-del" onclick="window.__rmSched(${i})" aria-label="O‘chirish">
+                    <i data-lucide="trash-2"></i>
+                </button>
             </div>`).join('');
         safeLucide(box);
     };
 
     window.__schedDraft = draft;
     window.__rmSched = (i) => { draft.splice(i, 1); draw(); };
-    window.__addSched = () => { draft.push({ day: '', time: '', subject: '' }); draw(); };
+    window.__addSched = (day) => {
+        draft.push({ day: day || todayDayName(), time: '', subject: '', teacher: '', room: '' });
+        draw();
+    };
+    // Tayyor shablon — dushanba..juma, 4 darsdan
+    window.__fillSched = () => {
+        const plan = [['08:00 — 09:30', 'Matematika'], ['09:45 — 11:15', 'Informatika'],
+                      ['12:30 — 14:00', 'O‘zbek tili'], ['14:15 — 15:45', 'Ingliz tili']];
+        DAYS.slice(0, 5).forEach(day => plan.forEach(([time, subject]) =>
+            draft.push({ day, time, subject, teacher: '', room: '' })));
+        draw();
+    };
 
     openModal(modalShell({
         icon: '<i data-lucide="calendar-days"></i>',
         title: `Jadval — ${esc(group.name)}`,
+        size: 'lg',
         body: `
             <div class="stack">
-                <div class="d-flex items-center justify-between">
-                    <div class="fw-8">Haftalik mashg‘ulotlar</div>
-                    <button class="btn btn-soft btn-sm" onclick="window.__addSched()"><i data-lucide="plus"></i> Qo‘shish</button>
+                <div class="sched-edit-head">
+                    <div>
+                        <div class="fw-8">Haftalik mashg‘ulotlar</div>
+                        <div class="form-hint">Kun, vaqt, fan, o‘qituvchi va xonani kiriting</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-soft btn-sm" onclick="window.__fillSched()">
+                            <i data-lucide="wand-2"></i> Shablon</button>
+                        <button class="btn btn-primary btn-sm" onclick="window.__addSched()">
+                            <i data-lucide="plus"></i> Dars qo‘shish</button>
+                    </div>
                 </div>
                 <div id="sched-rows" class="stack-sm"></div>
             </div>`,
         footer: `
             <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
             <button class="btn btn-primary" onclick="window.__svSchedule(${group.id})">
-                <i data-lucide="save"></i> Saqlash
+                <i data-lucide="save"></i> Jadvalni saqlash
             </button>`,
     }));
 
@@ -1261,7 +1657,14 @@ window.openScheduleEditor = async (group) => {
 
 window.__svSchedule = async (gid) => {
     try {
-        await api_patch(`/groups/${gid}`, { schedule: (window.__schedDraft || []).filter(s => (s.day || s.time || s.subject)) });
+        const clean = (window.__schedDraft || [])
+            .filter(s => (s.day || s.time || s.subject))
+            .map(s => ({
+                day: (s.day || '').trim(), time: (s.time || '').trim(),
+                subject: (s.subject || '').trim(),
+                teacher: (s.teacher || '').trim(), room: (s.room || '').trim(),
+            }));
+        await api_patch(`/groups/${gid}`, { schedule: clean });
         showToast('Jadval saqlandi', 'success');
         cModal();
         renderView('schedule');
@@ -1330,7 +1733,7 @@ async function d_student() {
         <div class="grid grid-4 mt-6">
             ${statTile({ label: 'Ballarim', value: u.points, icon: 'zap', tone: 'accent', href: '#leaderboard' })}
             ${statTile({ label: 'Yakunlangan dars', value: s.lessonsDone, icon: 'book-open-check', href: '#courses' })}
-            ${statTile({ label: 'Duel yutishlari', value: s.duelWins, icon: 'swords', tone: 'violet', href: '#duel' })}
+            ${statTile({ label: 'O‘yin ballari', value: s.duelWins, icon: 'gamepad-2', tone: 'violet', href: '#game' })}
             ${statTile({ label: 'Davomat', value: `${attPct}%`, icon: 'user-check', tone: attPct >= 70 ? 'green' : 'amber', foot: `${present}/${attTotal} kun` })}
         </div>
 
@@ -1410,12 +1813,12 @@ async function d_student() {
                                 </div>
                             </div>
                         </button>
-                        <button class="tile click" onclick="go('duel')" style="padding:14px">
+                        <button class="tile click" onclick="go('shop')" style="padding:14px">
                             <div class="d-flex items-center gap-3">
-                                <div class="tile-icon accent"><i data-lucide="swords"></i></div>
+                                <div class="tile-icon accent"><i data-lucide="shopping-bag"></i></div>
                                 <div class="grow">
-                                    <div class="tile-title">Duel o‘ynash</div>
-                                    <div class="tile-sub">${s.duelWins} marta yutdingiz</div>
+                                    <div class="tile-title">Do‘kon</div>
+                                    <div class="tile-sub">${num(u.points)} XP — sovg‘a olsh</div>
                                 </div>
                             </div>
                         </button>
@@ -1517,7 +1920,7 @@ async function d_ustoz() {
                             <div class="d-flex items-center gap-3">
                                 <div class="tile-icon violet"><i data-lucide="list-checks"></i></div>
                                 <div class="grow"><div class="tile-title">Savol banki</div>
-                                    <div class="tile-sub">Duel va o‘yin uchun savollar</div></div>
+                                    <div class="tile-sub">O‘yin va test uchun savollar</div></div>
                             </div>
                         </button>
                         <button class="tile click" onclick="openScheduleEditor(window.__myGroup)" style="padding:14px">
@@ -2731,14 +3134,14 @@ async function v_reports() {
         <div class="mt-6">
             ${sectionCard('Talabalar reytingi', `
                 <div class="table-wrap"><table class="table responsive">
-                    <thead><tr><th>#</th><th>Talaba</th><th data-label="Guruh">Guruh</th><th data-label="Ball">Ball</th><th data-label="Duel">Duel</th></tr></thead>
+                    <thead><tr><th>#</th><th>Talaba</th><th data-label="Guruh">Guruh</th><th data-label="Ball">Ball</th><th data-label="O‘yin">O‘yin ballari</th></tr></thead>
                     <tbody>${[...students].sort((a, b) => num(b.points) - num(a.points)).slice(0, 25).map((s, i) => `
                         <tr>
                             <td data-label="#"><span class="rank-medal ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span></td>
                             <td data-label="Talaba"><div class="d-flex items-center gap-2">${avatarHtml(s, 'avatar-xs')}<span class="cell-main">${esc(s.ism)}</span></div></td>
                             <td data-label="Guruh"><span class="cell-sub">${esc(groups.find(g => g.id === s.groupId)?.name || '—')}</span></td>
                             <td data-label="Ball"><span class="badge badge-orange">${num(s.points)}</span></td>
-                            <td data-label="Duel"><span class="cell-sub">${num(s.duelWins)}</span></td>
+                            <td data-label="O‘yin"><span class="cell-sub">${num(s.duelWins)}</span></td>
                         </tr>`).join('')}</tbody>
                 </table></div>`, { icon: '<i data-lucide="users"></i>' })}
         </div>`;
@@ -2857,7 +3260,7 @@ async function v_lead() {
                         ${avatarHtml(s, 'avatar-sm')}
                         <div class="grow" style="min-width:0">
                             <div class="list-title truncate">${esc(s.ism)}</div>
-                            <div class="list-sub">${(s.achievements || []).length} yutuq · ${num(s.duelWins)} duel</div>
+                            <div class="list-sub">${(s.achievements || []).length} yutuq · ${num(s.duelWins)} o‘yin balli</div>
                         </div>
                         <span class="badge badge-orange">${num(s.points)} XP</span>
                     </div>`).join('') || '<div class="list-row"><span class="c-soft t-sm">Ko‘proq o‘quvchilar yo‘q</span></div>'}
@@ -3052,27 +3455,72 @@ async function v_library() {
         ${books.length === 0
             ? emptyState('library', 'Kutubxona bo‘sh', 'Kitoblar tez orada qo‘shiladi.')
             : `<div class="grid grid-auto">
-                ${books.map(b => `
+                ${books.map(b => {
+                    const hasLink = !!(b.link && b.link !== '#');
+                    return `
                 <article class="card card-pad card-hover d-flex flex-col gap-3">
-                    <div style="height:150px;border-radius:var(--r-lg);overflow:hidden;background:linear-gradient(135deg,var(--blue-50),var(--orange-50));display:flex;align-items:center;justify-content:center">
+                    <div class="book-cover">
                         ${b.image
-                            ? `<img src="${esc(b.image)}" alt="${esc(b.title)}" style="width:100%;height:100%;object-fit:cover" loading="lazy">`
-                            : '<i data-lucide="book" style="width:44px;height:44px;color:var(--blue-300)"></i>'}
+                            ? `<img src="${esc(b.image)}" alt="${esc(b.title)}" loading="lazy">`
+                            : `<span class="book-cover-emoji"><i data-lucide="book-open"></i></span>`}
+                        <span class="book-cover-tag">PDF</span>
                     </div>
                     <div class="grow">
                         <h3 class="tile-title">${esc(b.title)}</h3>
                         <p class="tile-sub clamp-3 mt-2">${esc(b.description || '')}</p>
                     </div>
                     <div class="d-flex gap-2">
-                        <a class="btn btn-soft btn-sm grow" href="${esc(b.link || '#')}" target="_blank" rel="noopener">
-                            <i data-lucide="external-link"></i> Ochish
-                        </a>
+                        <button class="btn btn-primary btn-sm grow" onclick="window.__dlBook(${b.id},this)">
+                            <i data-lucide="download"></i> PDF yuklab olish
+                        </button>
+                        ${hasLink ? `<a class="btn btn-soft btn-sm" href="${esc(b.link)}" target="_blank" rel="noopener" aria-label="Onlayn ochish">
+                            <i data-lucide="external-link"></i></a>` : ''}
                         ${canEdit ? `
                         <button class="btn-icon sm" onclick="window.__delBook(${b.id})" aria-label="O’chirish"><i data-lucide="trash-2"></i></button>` : ''}
                     </div>
-                </article>`).join('')}
+                </article>`;
+                }).join('')}
             </div>`}`;
 }
+
+// PDF yuklab olish — token'ni query orqali ham yuboramiz, endpoint
+// @jwt_required(optional=True) bo'lgani uchun ochiq ham ishlaydi.
+window.__dlBook = (id, btn) => {
+    const restore = () => {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="download"></i> PDF yuklab olish';
+        safeLucide(btn);
+    };
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Tayyorlanmoqda…';
+    }
+    const url = `/api/books/${id}/download`;
+    const token = getAuthToken();
+    fetch(token ? `${url}?token=${encodeURIComponent(token)}` : url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+        .then(r => {
+            if (!r.ok) throw new Error('PDF tayyorlanmadi');
+            const cd = r.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename="?([^";]+)"?/);
+            return r.blob().then(b => ({ blob: b, name: m ? m[1] : 'kitob.pdf' }));
+        })
+        .then(({ blob, name }) => {
+            const href = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = href;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(href), 4000);
+            showToast('PDF yuklab olindi', 'success');
+            restore();
+        })
+        .catch(e => { showToast(e.message, 'error'); restore(); });
+};
 
 window.__openBookEditor = () => {
     openModal(modalShell({
@@ -3111,26 +3559,37 @@ window.__delBook = async (id) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════
-//  Views: duel & mini game
+//  Views: mini o'yin
 // ══════════════════════════════════════════════════════════════════════
-function quizShell(kind) {
-    const isDuel = kind === 'duel';
+async function v_game() {
+    const best = num(STATE.user?.duelWins);
     return `
-        ${pageHead(isDuel ? 'Duel' : 'Mini o‘yin', isDuel
-            ? 'Savollarga to‘g‘ri javob bering va yutishga intiling'
-            : 'Tezkor test — +30 XP', `
-            <span class="badge badge-orange"><i data-lucide="zap"></i> ${isDuel ? '+100 XP' : '+30 XP'}</span>`)}
+        ${pageHead('Mini o‘yin', 'Tezkor test — har bir to‘g‘ri javob uchun ball', `
+            <span class="badge badge-orange"><i data-lucide="zap"></i> +30 XP</span>`)}
 
-        <div id="quiz-root">${emptyState('swords', 'Tayyor emas', isDuel ? 'Duelni boshlash uchun tugmani bosing' : 'O‘yinni boshlash uchun tugmani bosing',
-            `<button class="btn btn-primary" onclick="startDuelQuiz('${isDuel ? 'duel' : 'mini_game'}')">
-                <i data-lucide="play"></i> ${isDuel ? 'Duelni boshlash' : 'O‘yinni boshlash'}</button>`)}
+        <div id="quiz-root">
+            <div class="game-intro card card-pad-lg">
+                <div class="game-intro-glow"></div>
+                <div class="game-badge-big">🕹️</div>
+                <h2 class="t-2xl fw-9 mt-4">Mini o‘yinga tayyor</h2>
+                <p class="c-muted mt-2" style="max-width:34rem;margin-inline:auto">
+                    10 ta savol beriladi. Har bir savol uchun 15 soniya bor —
+                    vaqt tugasa javob noto‘g‘ri hisoblanadi. Natija foiz bo‘yicha:
+                    <b>80%+</b> — 30 XP, <b>50%+</b> — 15 XP.
+                </p>
+                <div class="game-rules">
+                    <div class="game-rule"><i data-lucide="timer"></i> 15 soniya / savol</div>
+                    <div class="game-rule"><i data-lucide="trophy"></i> Rekor: ${best}</div>
+                    <div class="game-rule"><i data-lucide="zap"></i> +30 XP</div>
+                </div>
+                <button class="btn btn-primary btn-lg mt-6" onclick="startGameQuiz('mini_game')">
+                    <i data-lucide="play"></i> O‘yinni boshlash
+                </button>
+            </div>
         </div>`;
 }
 
-async function v_duel() { return quizShell('duel'); }
-async function v_game() { return quizShell('game'); }
-
-window.startDuelQuiz = async (type) => {
+window.startGameQuiz = async (type) => {
     const root = document.getElementById('quiz-root');
     if (!root) return;
     root.innerHTML = '<div class="loading-box"><span class="spinner"></span> Savollar yuklanmoqda…</div>';
@@ -3151,69 +3610,92 @@ window.startDuelQuiz = async (type) => {
             return;
         }
 
-        const state = { i: 0, score: 0, total: list.length, locked: false, list };
+        const state = { i: 0, score: 0, total: list.length, locked: false, list, timer: null, left: 15 };
         STATE.quiz = state;
+
+        const clearTimer = () => { if (state.timer) { clearInterval(state.timer); state.timer = null; } };
 
         const draw = () => {
             if (state.i >= state.list.length) return drawResult();
             const q = state.list[state.i];
             const opts = ['A', 'B', 'C', 'D'].map(L => ({ L, text: q[`option${L}`] })).filter(o => o.text);
+            state.left = 15;
             root.innerHTML = `
-                <div class="stack">
-                    <div class="d-flex items-center justify-between">
-                        <span class="badge badge-blue">Savol ${state.i + 1} / ${state.list.length}</span>
-                        <span class="badge badge-green"><i data-lucide="zap"></i> ${state.score} ball</span>
+                <div class="game-stage card card-pad-lg">
+                    <div class="game-top">
+                        <span class="badge badge-blue"><i data-lucide="list-checks"></i> Savol ${state.i + 1}/${state.list.length}</span>
+                        <span class="game-timer" id="game-timer"><i data-lucide="timer"></i> <b>15</b>s</span>
+                        <span class="badge badge-green"><i data-lucide="zap"></i> ${state.score}</span>
                     </div>
                     ${progressBar(Math.round((state.i / state.list.length) * 100), 'accent')}
-                    <div class="card card-pad-lg mt-3">
-                        <h2 class="t-lg fw-9" style="line-height:1.35">${esc(q.questionText)}</h2>
-                        <div class="stack-sm mt-5">
-                            ${opts.map(o => `
-                            <button class="btn btn-outline btn-lg" style="justify-content:flex-start;text-align:left"
-                                    onclick="window.__answer('${o.L}',this)">
-                                <span class="badge badge-blue">${o.L}</span>
-                                <span class="grow">${esc(o.text)}</span>
-                            </button>`).join('')}
-                        </div>
+
+                    <h2 class="game-q mt-5">${esc(q.questionText)}</h2>
+
+                    <div class="game-opts mt-5">
+                        ${opts.map(o => `
+                        <button class="game-opt" data-key="${o.L}" onclick="window.__answer('${o.L}',this)">
+                            <span class="game-opt-key">${o.L}</span>
+                            <span class="grow">${esc(o.text)}</span>
+                            <i class="game-opt-mark" data-lucide="check"></i>
+                        </button>`).join('')}
                     </div>
                 </div>`;
             safeLucide(root);
+            clearTimer();
+            const el = document.getElementById('game-timer');
+            state.timer = setInterval(() => {
+                state.left -= 1;
+                if (el) {
+                    el.querySelector('b').textContent = Math.max(0, state.left);
+                    el.classList.toggle('hot', state.left <= 5);
+                }
+                if (state.left <= 0) {
+                    clearTimer();
+                    const btns = root.querySelectorAll('.game-opt');
+                    const right = root.querySelector(`.game-opt[data-key="${q.correctAnswer}"]`)
+                        || [...btns].find(b => b.textContent.trim().startsWith(q.correctAnswer));
+                    if (right) right.classList.add('right');
+                    setTimeout(() => { state.i++; state.locked = false; draw(); }, 1100);
+                }
+            }, 1000);
         };
 
         const drawResult = () => {
-            const isDuel = QUIZ_TYPE(type) === 'duel';
+            clearTimer();
             const pct = Math.round((state.score / state.total) * 100);
+            const medal = pct >= 80 ? '🏆' : pct >= 50 ? '🥈' : '💪';
+            const word = pct >= 80 ? 'Ajoyib natija!' : pct >= 50 ? 'Yaxshi, davom eting!' : 'Yana harakat qiling!';
             root.innerHTML = `
-                <div class="card card-pad-lg text-center">
-                    <div style="font-size:3.5rem">${pct >= 80 ? '🏆' : pct >= 50 ? '👍' : '💪'}</div>
+                <div class="game-over card card-pad-lg">
+                    <div class="confetti" aria-hidden="true"></div>
+                    <div class="game-medal">${medal}</div>
                     <h2 class="t-2xl fw-9 mt-3">${state.score} / ${state.total}</h2>
-                    <p class="c-muted mt-2">${pct >= 80 ? 'Ajoyib natija!' : pct >= 50 ? 'Yaxshi, davom eting!' : 'Yana harakat qiling!'}</p>
+                    <div class="game-pct"><b>${pct}%</b> to‘g‘ri javob</div>
+                    <p class="c-muted mt-2">${word}</p>
+                    ${state.score > 0 ? `
+                        <div class="game-xp"><i data-lucide="zap"></i> +${pct >= 80 ? 30 : 15} XP qo‘shilmoqda…</div>` : ''}
                     <div class="d-flex gap-2 justify-center mt-6 flex-wrap">
-                        <button class="btn btn-primary" onclick="startDuelQuiz('${type}')"><i data-lucide="rotate-cw"></i> Qayta o‘ynash</button>
-                        <button class="btn btn-outline" onclick="go('courses')">Kurslarga o‘tish</button>
+                        <button class="btn btn-primary" onclick="startGameQuiz('${type}')"><i data-lucide="rotate-cw"></i> Qayta o‘ynash</button>
+                        <button class="btn btn-outline" onclick="go('shop')"><i data-lucide="shopping-bag"></i> Do‘kon</button>
                     </div>
                 </div>`;
             safeLucide(root);
             if (state.score > 0) {
-                if (isDuel) {
-                    try { api_post('/duel/win', {}); } catch (err) { /* hisob serverda */ }
-                    addPoints(100, 'Duel yutug‘i', 'duels');
-                } else {
-                    addPoints(30, 'Mini o‘yin', 'mini_game');
-                }
+                addPoints(pct >= 80 ? 30 : 15, 'Mini o‘yin', 'mini_game');
             }
         };
 
         window.__answer = (letter, btn) => {
             if (state.locked) return;
             state.locked = true;
+            clearTimer();
             const q = state.list[state.i];
             const correct = q.correctAnswer === letter;
             if (correct) state.score++;
-            btn.classList.add(correct ? 'btn-success' : 'btn-danger');
+            btn.classList.add(correct ? 'right' : 'wrong');
             if (!correct) {
                 [...btn.parentElement.children].forEach(b => {
-                    if (b.textContent.trim().startsWith(q.correctAnswer)) b.classList.add('btn-success');
+                    if (b.querySelector('.game-opt-key')?.textContent.trim() === q.correctAnswer) b.classList.add('right');
                 });
             }
             setTimeout(() => {
@@ -3241,7 +3723,7 @@ async function v_questions() {
         ${pageHead('Savollar', `${questions.length} ta savol`, canEdit
             ? `<button class="btn btn-primary" onclick="openQuestionEditor()"><i data-lucide="plus"></i> Savol qo‘shish</button>` : '')}
         ${questions.length === 0
-            ? emptyState('list-checks', 'Savol bazasi bo‘sh', 'Duel va mini o‘yin uchun savol qo‘shing.')
+            ? emptyState('list-checks', 'Savol bazasi bo‘sh', 'O‘yin va test uchun savollar qo‘shing.')
             : `<div class="stack-sm">
                 ${questions.map(q => `
                 <div class="card card-pad-sm">
@@ -3255,7 +3737,7 @@ async function v_questions() {
                                 </span>`).join('')}
                             </div>
                             <div class="d-flex gap-2 mt-3">
-                                <span class="badge ${q.type === 'duel' ? 'badge-violet' : 'badge-blue'}">${esc(QUIZ_TYPE_LABEL[q.type] || 'Duel')}</span>
+                                <span class="badge ${q.type === 'quiz' ? 'badge-violet' : 'badge-blue'}">${esc(QUIZ_TYPE_LABEL[q.type] || 'Mini o‘yin')}</span>
                                 <span class="badge">${esc(q.difficulty || 'medium')}</span>
                             </div>
                         </div>
@@ -3279,36 +3761,71 @@ window.__editQuestion = async (id) => {
 // ══════════════════════════════════════════════════════════════════════
 async function v_schedule() {
     const g = await getMyGroup();
-    if (!g) return pageHead('Dars jadvali') + emptyState('calendar-x', 'Jadval mavjud emas', 'Siz biror guruhga biriktirilmagan.');
+    if (!g) {
+        return pageHead('Dars jadvali') +
+            emptyState('calendar-x', 'Jadval mavjud emas', 'Siz biror guruhga biriktirilmagan.');
+    }
     window.__myGroup = g;
 
+    const items = (g.schedule || []).filter(s => s && (s.day || s.time || s.subject));
     const byDay = {};
-    (g.schedule || []).forEach(s => { (byDay[s.day] ||= []).push(s); });
-    const days = Object.keys(byDay).length ? Object.keys(byDay) : DAYS;
+    items.forEach(s => { (byDay[s.day] ||= []).push(s); });
+    Object.values(byDay).forEach(list =>
+        list.sort((a, b) => String(a.time || '').localeCompare(String(b.time || ''))));
+
+    const canEdit = ['admin', 'tech_admin', 'director', 'ustoz'].includes(STATE.user.role);
+    const todayName = todayDayName();
+    const totalLessons = items.length;
+    const week = items.reduce((a, s) => a + (+String(s.time || '').match(/\d+/)?.[0] || 0), 0);
 
     return `
-        ${pageHead('Dars jadvali', g.name, ['admin', 'tech_admin', 'ustoz'].includes(STATE.user.role)
-            ? `<button class="btn btn-primary" onclick="openScheduleEditor(window.__myGroup)"><i data-lucide="pencil"></i> Tahrirlash</button>` : '')}
-        <div class="stack-sm">
-            ${days.map(d => `
-                <div class="card card-pad">
-                    <div class="d-flex items-center gap-3 mb-3">
-                        <div class="card-icon"><i data-lucide="calendar-days"></i></div>
-                        <div class="fw-8">${esc(d)}</div>
+        ${pageHead('Dars jadvali', `${esc(g.name)} — haftalik jadval`, canEdit
+            ? `<button class="btn btn-primary" onclick="openScheduleEditor(window.__myGroup)">
+                   <i data-lucide="pencil"></i> Jadvalni tahrirlash</button>` : '')}
+
+        <div class="sched-stats">
+            <div class="sched-stat"><i data-lucide="calendar-days"></i>
+                <div><b>${totalLessons}</b><span>dars / hafta</span></div></div>
+            <div class="sched-stat"><i data-lucide="clock"></i>
+                <div><b>${week || totalLessons}</b><span>soat</span></div></div>
+            <div class="sched-stat ${items.some(s => s.day === todayName) ? 'live' : ''}"><i data-lucide="sun"></i>
+                <div><b>${esc(todayName)}</b><span>bugun</span></div></div>
+        </div>
+
+        <div class="sched-week">
+            ${DAYS.map(d => {
+                const list = byDay[d] || [];
+                const isToday = d === todayName;
+                const now = new Date();
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                return `
+                <section class="sched-day${isToday ? ' today' : ''}${list.length ? '' : ' off'}">
+                    <header class="sched-day-head">
+                        <b>${esc(d)}</b>
+                        <span>${list.length ? `${list.length} dars` : 'dam'}</span>
+                    </header>
+                    <div class="sched-day-body">
+                        ${list.length === 0
+                            ? '<div class="sched-empty">Mashg‘ulot yo‘q</div>'
+                            : list.map(s => {
+                                const hh = +String(s.time || '').match(/\d+/)?.[0];
+                                const past = isToday && Number.isFinite(hh) && hh * 60 + 30 < nowMin;
+                                return `
+                                <div class="sched-item${past ? ' past' : ''}">
+                                    <div class="sched-time"><i data-lucide="clock"></i>${esc(s.time || '—')}</div>
+                                    <div class="sched-subject">${esc(s.subject || 'Mashg‘ulot')}</div>
+                                    ${s.teacher ? `<div class="sched-teacher"><i data-lucide="user"></i>${esc(s.teacher)}</div>` : ''}
+                                    ${s.room ? `<div class="sched-room"><i data-lucide="map-pin"></i>${esc(s.room)}</div>` : ''}
+                                </div>`;
+                            }).join('')}
                     </div>
-                    ${(byDay[d] || []).length === 0
-                        ? '<div class="form-hint">Bu kunga mashg‘ulot belgilanmagan</div>'
-                        : `<div class="stack-sm">
-                            ${(byDay[d] || []).map(s => `
-                            <div class="list-soft d-flex items-center gap-3">
-                                <div class="rank-medal" style="width:56px;height:auto;padding:8px 4px;border-radius:10px;font-size:.75rem">${esc(s.time || '—')}</div>
-                                <div class="grow" style="min-width:0">
-                                    <div class="list-title truncate">${esc(s.subject || 'Mashg‘ulot')}</div>
-                                </div>
-                            </div>`).join('')}
-                        </div>`}
-                </div>`).join('')}
-        </div>`;
+                </section>`;
+            }).join('')}
+        </div>
+
+        ${totalLessons === 0 ? `<div class="mt-6">${emptyState('calendar-plus', 'Haftalik jadval to‘ldirilmagan',
+            canEdit ? 'Ustoz yoki administrator jadvalni tahrirlashi kerak.'
+                    : 'Jadvalni ustiziz to‘ldiradi.')}</div>` : ''}`;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -3455,14 +3972,103 @@ window.__svComment = async (e, id) => {
 // ══════════════════════════════════════════════════════════════════════
 //  Views: profile
 // ══════════════════════════════════════════════════════════════════════
+// ─── Check-in kartasi (GPS orqali) ──────────────────────────────────
+function checkinCard(done) {
+    if (done) {
+        return `
+        <section class="checkin-card done">
+            <div class="checkin-icon"><i data-lucide="check"></i></div>
+            <div class="grow">
+                <h3 class="t-lg fw-9">Bugun keldingiz! 🎉</h3>
+                <p class="c-muted t-sm mt-1">Davomatingiz “Keldi” deb belgilandi. Bugungi kun uchun +10 XP.</p>
+            </div>
+            <span class="badge badge-green"><i data-lucide="user-check"></i> Keldi</span>
+        </section>`;
+    }
+    return `
+    <section class="checkin-card">
+        <div class="checkin-icon"><i data-lucide="map-pin"></i></div>
+        <div class="grow">
+            <h3 class="t-lg fw-9">Bugun keldingizmi?</h3>
+            <p class="c-muted t-sm mt-1">
+                Telefonda <b>geolokatsiyani yoqing</b> va tugmani bosing — biz
+                kolledj hududida ekaningizni tekshirib, davomatni o‘zimiz qo‘yamiz.
+            </p>
+            <div class="d-flex gap-2 mt-4 flex-wrap">
+                <button class="btn btn-primary" id="checkin-btn" onclick="window.__checkIn(this)">
+                    <i data-lucide="navigation"></i> Kelishimni belgilash
+                </button>
+                <span class="t-xs c-muted" id="checkin-hint" style="align-self:center"></span>
+            </div>
+        </div>
+    </section>`;
+}
+
+window.__checkIn = async (btn) => {
+    const hint = document.getElementById('checkin-hint');
+    const say = (t) => { if (hint) hint.textContent = t; };
+
+    if (!navigator.geolocation) {
+        say('Bu brauzer geolokatsiyani qo‘llamaydi.');
+        showToast('Geolokatsiya mavjud emas', 'error');
+        return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Joylashuv aniqlanmoqda…';
+    say('Ruxsat so‘ralmoqda…');
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+            const res = await api_post('/attendance/checkin', {
+                lat: pos.coords.latitude, lng: pos.coords.longitude,
+                accuracy: pos.coords.accuracy,
+            });
+            if (res.checkedIn) {
+                showToast(res.message || 'Keldingiz! Davomat qo‘shildi', 'success');
+                if (res.points) { STATE.user.points = res.points; localStorage.setItem('lms_user', JSON.stringify(STATE.user)); updateHeaderUser(); }
+                renderView('profile');
+            } else {
+                say(res.message || 'Kolledj hududida emasiniz');
+                showToast(res.message || 'Kolledj hududida emasiniz', 'warn');
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="navigation"></i> Kelishimni belgilash';
+                safeLucide(btn);
+            }
+        } catch (e) {
+            say(e.message);
+            showToast(e.message, 'error');
+            btn.disabled = false;
+            btn.innerHTML = '<i data-lucide="navigation"></i> Kelishimni belgilash';
+            safeLucide(btn);
+        }
+    }, (err) => {
+        const msg = err.code === 1
+            ? 'Ruxsat rad etildi. Brauzer sozlamasidan geolokatsiyani yoqing.'
+            : 'Joylashuvni aniqlab bo‘lmadi. GPS yoqiqmi?';
+        say(msg);
+        showToast(msg, 'warn');
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="navigation"></i> Kelishimni belgilash';
+        safeLucide(btn);
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+};
+
 async function v_profile() {
     const u = STATE.user;
     const s = userStats(u);
-    const [achs, courses] = await Promise.all([getAchievements(), getCourses().catch(() => [])]);
+    const [achs, courses, myAtt] = await Promise.all([
+        getAchievements(), getCourses().catch(() => []), getMyAttendance().catch(() => []),
+    ]);
     const unlocked = u.achievements || [];
+    // Bugungi kunlik belgi: o'quvchi allaqachon kelganmi?
+    const today = new Date().toISOString().slice(0, 10);
+    const checkedIn = (myAtt || []).some(a => a.date === today || a.date?.startsWith(today));
+    const isStudent = u.role === 'student';
 
     return `
         ${pageHead('Profil', 'Akkauntingizni boshqaring')}
+
+        ${isStudent ? checkinCard(checkedIn) : ''}
 
         <div class="split split-2">
             <div class="stack">
@@ -3521,7 +4127,7 @@ async function v_profile() {
                         ${[
                             ['Ballar', num(u.points), 'zap'],
                             ['Yakunlangan dars', s.lessonsDone, 'book-open-check'],
-                            ['Duel yutishlari', s.duelWins, 'swords'],
+                            ['O‘yin ballari', s.duelWins, 'gamepad-2'],
                             ['Yutuqlar', `${unlocked.length}/${achs.length}`, 'award'],
                         ].map(([l, v, ic]) => `
                         <div class="list-row" style="padding:10px 0">
@@ -3746,7 +4352,8 @@ const VIEWS = {
     chat: v_chat,
     'staff-chat': v_staff_chat,
     library: v_library,
-    duel: v_duel,
+    shop: v_shop,
+    pending: v_pending,
     game: v_game,
     questions: v_questions,
     schedule: v_schedule,
@@ -3829,9 +4436,17 @@ function setupInteractions() {
                 logForm.reset();
                 window.location.hash = DASHBOARD_VIEW[user.role] || 'student-dashboard';
             } catch (err) {
-                errBox?.classList.remove('hidden');
-                const span = errBox?.querySelector('span');
-                if (span) span.textContent = err.message || 'Email yoki parol xato!';
+                // pending / rejected hisoblar 403 qaytaradi — maxsus ko'rsatamiz
+                if (err.status === 403) {
+                    const box = document.getElementById('login-pending-card');
+                    box?.classList.remove('hidden');
+                    const txt = document.getElementById('login-pending-msg');
+                    if (txt) txt.textContent = err.message || 'Hisobingiz hali tasdiqlanmagan.';
+                } else {
+                    errBox?.classList.remove('hidden');
+                    const span = errBox?.querySelector('span');
+                    if (span) span.textContent = err.message || 'Email yoki parol xato!';
+                }
             } finally {
                 if (btn) {
                     btn.disabled = false;
@@ -3859,6 +4474,13 @@ function setupInteractions() {
 
                 const user = await register(name, email, pass, groupId);
                 STATE.user = user;
+                if (user?.status === 'pending' || user?.status === 'rejected') {
+                    const box = document.getElementById('reg-pending-card');
+                    box?.classList.remove('hidden');
+                    regForm.reset();
+                    window.setTimeout(() => { window.location.hash = 'login'; }, 2600);
+                    return;
+                }
                 window.location.hash = DASHBOARD_VIEW[user.role] || 'student-dashboard';
                 regForm.reset();
             } catch (err) {

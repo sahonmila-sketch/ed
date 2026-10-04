@@ -22,6 +22,9 @@ class User(db.Model):
     last_point_date = db.Column(db.String(20), nullable=True)
     parent_of_id = db.Column(db.Integer, nullable=True)
     telegram_chat_id = db.Column(db.String(50), nullable=True)
+    # Ro'yxatdan o'tgan foydalanuvchi avval "pending" (kutilmoqda) bo'ladi —
+    # admin tasdiqlagach kirish huquqi beriladi.
+    status = db.Column(db.String(20), default='active')
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def set_password(self, password):
@@ -45,7 +48,8 @@ class User(db.Model):
             'dailyCategoryPoints': json.loads(self.daily_category_points or '{}'),
             'lastPointDate': self.last_point_date,
             'parentId': self.parent_of_id,
-            'telegramChatId': self.telegram_chat_id
+            'telegramChatId': self.telegram_chat_id,
+            'status': self.status or 'active'
         }
 
 class Course(db.Model):
@@ -264,6 +268,51 @@ class Book(db.Model):
 
     def to_dict(self):
         return {'id': self.id, 'title': self.title, 'description': self.description, 'image': self.image, 'link': self.link}
+
+class ShopItem(db.Model):
+    __tablename__ = 'shop_items'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, default='')
+    image = db.Column(db.String(500), default='')
+    emoji = db.Column(db.String(16), default='')     # rasm yo'q ko'rsatish uchun
+    price = db.Column(db.Integer, default=100)      # necha XP turadi
+    stock = db.Column(db.Integer, default=0)       # 0 = cheksiz
+    active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'description': self.description,
+            'image': self.image,
+            'emoji': self.emoji,
+            'price': self.price,
+            'stock': self.stock,
+            'active': bool(self.active),
+        }
+
+
+class Purchase(db.Model):
+    __tablename__ = 'purchases'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('shop_items.id'), nullable=True)
+    title = db.Column(db.String(200), default='')
+    price = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'userId': self.user_id,
+            'itemId': self.item_id,
+            'title': self.title,
+            'price': self.price,
+            'createdAt': self.created_at.isoformat() if self.created_at else '',
+        }
+
 
 class Achievement(db.Model):
     __tablename__ = 'achievements'

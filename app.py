@@ -6,11 +6,12 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_jwt_extended import (
     JWTManager, create_access_token, jwt_required, get_jwt_identity,
-    get_jwt
+    get_jwt, verify_jwt_in_request
 )
 
 from models import db, User, Course, Lesson, LessonSession, Post, Ticket, Group
 from models import Attendance, ChatMessage, Notification, Question, Book, Achievement, Setting, LandingData, Grade
+from models import ShopItem, Purchase
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,6 +48,18 @@ STAFF_ROLES = ('admin', 'tech_admin', 'director', 'ustoz')
 
 # ─── Helpers ─────────────────────────────────────────────────────
 XP_LIMITS = {'lessons': 50, 'duels': 100, 'miniGame': 30, 'other': 20}
+
+def utcnow():
+    """SQLite DateTime ustunlari timezone'siz saqlaydi. Shuning uchun
+    `datetime.now(timezone.utc) - db_value` TypeError beradi
+    ("can't subtract offset-naive and offset-aware datetimes").
+    Butun hisob-kitoblar mana shu naive UTC yordamchisi orqali yuradi."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+def as_naive(dt):
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 def get_current_user():
     return db.session.get(User, get_jwt_identity())
@@ -247,6 +260,18 @@ with app.app_context():
 
     ensure_column('users', 'parent_of_id', "ALTER TABLE users ADD COLUMN parent_of_id INTEGER")
     ensure_column('users', 'telegram_chat_id', "ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(50)")
+    ensure_column('users', 'status', "ALTER TABLE users ADD COLUMN status VARCHAR(20) DEFAULT 'active'")
+    # shop_items jadvali eski versiyada "emoji" ustunisiz yaratilgan bo'lishi mumkin
+    ensure_column('shop_items', 'emoji', "ALTER TABLE shop_items ADD COLUMN emoji VARCHAR(16)")
+    # Eski hisoblar "NULL" bo'lib qolmasligi uchun
+    from sqlalchemy import text as _text
+    db.session.execute(_text("UPDATE users SET status = 'active' WHERE status IS NULL OR status = ''"))
+    # "Duël" bo'limi olib tashlangachidan beri, eski savollar 'duel' turida
+    # qolgan bo'lsa mini_o'yin uchun ko'rinmay qolardi.
+    db.session.execute(_text(
+        "UPDATE questions SET question_type = 'mini_game' "
+        "WHERE question_type IS NULL OR question_type NOT IN ('mini_game', 'quiz')"))
+    db.session.commit()
 
     seed_data()
 
@@ -264,19 +289,19 @@ def haversine_distance(lat1, lng1, lat2, lng2):
 def get_college_location():
     lat = Setting.get('college_lat')
     lng = Setting.get('college_lng')
-    radius = Setting.get('attendance_radius', '200')
+    radius = Setting.get('attendance_radius', '5000')
     # Sozlamalar qo'lda tahrirlangan bo'lishi mumkin — noto'g'ri qiymat
     # butun endpointni 500 qilmasligi kerak.
     try:
         radius = float(radius)
     except (TypeError, ValueError):
-        radius = 200.0
+        radius = 5000.0
     if lat and lng:
         try:
             return float(lat), float(lng), radius
         except (TypeError, ValueError):
             pass
-    return None, None, 200.0
+    return None, None, 5000.0
 
 # ─── Telegram notification helper ────────────────────────────
 import urllib.request, urllib.error
@@ -336,6 +361,15 @@ def auth_login():
     if not user or not user.check_password(data.get('password') or ''):
         return jsonify({"error": "Email yoki parol xato"}), 401
 
+    # Administrator hali tasdiqlamagan hisoblar tizimga kira olmaydi.
+    if user.status == 'pending':
+        return jsonify({
+            "error": "Hisobingiz administrator tasdiqlashini kutilmoqda.",
+            "status": "pending"
+        }), 403
+    if user.status == 'rejected':
+        return jsonify({"error": "Hisobingiz rad etilgan.", "status": "rejected"}), 403
+
     access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
     return jsonify({"token": access_token, "user": user.to_dict()})
 
@@ -362,7 +396,7 @@ def auth_register():
         group = db.session.get(Group, int(data['groupId']))
 
     user = User(full_name=name, email=email, role='student', xp=0,
-                group_id=group.id if group else None)
+                group_id=group.id if group else None, status='pending')
     user.set_password(password)
     db.session.add(user)
     db.session.flush()
@@ -374,6 +408,30 @@ def auth_register():
         group.student_ids = json.dumps(ids)
 
     db.session.commit()
+
+    # Adminga "yangi foydalanuvchi kutilmoqda" xabari
+    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
+    db.session.add(Notification(
+        user_id=None, msg=f"Yangi ro‘yxatdan o‘tgan foydalanuvchi: {name} ({email})",
+        date=now_str, type='info', seen=False))
+
+    # Tasdiqlash oynasi ochiq bo'lmasa — foydalanuvchi darhol kirish huquqiga ega
+    auto_approve = Setting.get('autoApprove', 'false') == 'true'
+    if auto_approve:
+        user.status = 'active'
+        db.session.commit()
+
+    if not user.status or user.status == 'rejected':
+        return jsonify({
+            "error": "Ro‘yxatdan o‘tdingiz. Administrator tasdiqlashini kutilmoqda.",
+            "status": "pending"
+        }), 202
+    if user.status == 'pending':
+        return jsonify({
+            "error": "Ro‘yxatdan o‘tdingiz. Administrator tasdiqlashini kutilmoqda.",
+            "status": "pending"
+        }), 202
+
     access_token = create_access_token(identity=str(user.id), additional_claims={'role': user.role})
     return jsonify({"token": access_token, "user": user.to_dict()}), 201
 
@@ -731,14 +789,40 @@ def delete_course(course_id):
 @jwt_required()
 def start_lesson(lesson_id):
     user = get_current_user()
-    lesson = Lesson.query.get(lesson_id)
+    lesson = db.session.get(Lesson, lesson_id)
     if not lesson:
         return jsonify({"error": "Dars topilmadi"}), 404
 
-    session = LessonSession(user_id=user.id, lesson_id=lesson_id, start_time=datetime.now(timezone.utc))
+    # Oldingi tuganmagan sessiyalardagi vaqtni hisobga olamiz — brauzerni
+    # yopib yana ochilsa, o'quvchi 20 daqiqani qayta boshlashiga majbur
+    # bo'lmasin. (LessonSession da 'end_time' ustuni yo'q: tugagan
+    # sessiyalar 'completed' bilan belgilanadi.)
+    required = lesson_required_seconds()
+    spent = 0.0
+    prev = LessonSession.query.filter_by(
+        user_id=user.id, lesson_id=lesson_id, completed=False)\
+        .order_by(LessonSession.start_time.asc()).all()
+    for s in prev:
+        started = as_naive(s.start_time)
+        if started is None:
+            continue
+        delta = (utcnow() - started).total_seconds()
+        if delta > 0:
+            spent += delta
+        if spent >= required:
+            break
+    spent = min(spent, required)
+
+    session = LessonSession(user_id=user.id, lesson_id=lesson_id,
+                            start_time=utcnow() - timedelta(seconds=spent))
     db.session.add(session)
     db.session.commit()
-    return jsonify({"sessionId": session.id, "startTime": session.start_time.isoformat()})
+    return jsonify({
+        "sessionId": session.id,
+        "startTime": session.start_time.isoformat(),
+        "alreadySec": int(spent),
+        "requiredSeconds": required,
+    })
 
 @app.route('/api/lessons/<int:lesson_id>/complete', methods=['POST'])
 @jwt_required()
@@ -753,9 +837,11 @@ def complete_lesson(lesson_id):
     if not ls:
         return jsonify({"error": "Dars sessiyasi topilmadi"}), 404
 
-    elapsed = (datetime.now(timezone.utc) - ls.start_time).total_seconds()
-    if elapsed < 1200:
-        return jsonify({"error": f"20 daqiqa to'liq kuting ({1200 - int(elapsed)} soniya qoldi)"}), 400
+    elapsed = (utcnow() - as_naive(ls.start_time)).total_seconds()
+    required = lesson_required_seconds()
+    if elapsed < required:
+        return jsonify({"error": f"{required // 60} daqiqa to'liq kuting ({int(required - elapsed)} soniya qoldi)",
+                        "left": int(required - elapsed)}), 400
 
     progress = json.loads(user.progress or '{}')
     cid = lesson.course_id
@@ -1047,19 +1133,40 @@ def send_chat():
 # ══════════════════════════════════════════════════════════════════
 #  QUESTIONS, BOOKS, ACHIEVEMENTS
 # ══════════════════════════════════════════════════════════════════
-QUIZ_TYPES = ('duel', 'mini_game', 'quiz')
+QUIZ_TYPES = ('mini_game', 'quiz')
 
 
-def _norm_quiz_type(value, default='duel'):
+def _norm_quiz_type(value, default='mini_game'):
     """Tur nomini bitta ko'rinishga keltiradi.
 
-    Eski versiyalar 'miniGame' yozgan, yangilar 'mini_game' — ikkalasi ham
-    qabul qilinadi, saqlanadigani har doim QUIZ_TYPES ichidan.
+    Eski versiyalar 'miniGame' yozgan, keyinroq 'duel' deb atalagan —
+    duel bo'limi olib tashlangachidan beri bu ikkalasi ham 'mini_game' ga
+    aylantiriladi. Saqlanadigisi har doim QUIZ_TYPES ichidan.
     """
     v = (value or '').strip().lower().replace('-', '_')
-    if v in ('minigame', 'mini', 'game'):
+    if v in ('minigame', 'mini', 'game', 'duel', 'duels', 'battle'):
         return 'mini_game'
     return v if v in QUIZ_TYPES else default
+
+
+def migrate_duel_questions():
+    """'duel' turidagi savollarni mini_o'yin ga ko'chiradi.
+
+    Bo'lim olib tashlangandan keyin qolgan savollar o'yin o'quvchilari uchun
+    ko'rinmas bo'lib qolardi (ular 'duel' filtri bilan chaqirilardi).
+    """
+    rows = Question.query.filter(
+        db.or_(Question.question_type == 'duel',
+               Question.question_type == 'duelS'.lower(),
+               Question.question_type.is_(None))).all()
+    changed = 0
+    for q in rows:
+        if (q.question_type or 'duel') != 'mini_game':
+            q.question_type = 'mini_game'
+            changed += 1
+    if changed:
+        db.session.commit()
+    return changed
 
 
 @app.route('/api/questions', methods=['GET'])
@@ -1153,10 +1260,253 @@ def delete_book(bid):
     db.session.commit()
     return jsonify({"success": True})
 
+# ── Kitobni PDF sifatida yuklab olish ──────────────────────────────────
+# Wirthugga hech qanday tashqi kutubxona yo'q (reportlab/FPDF yo'q), shuning
+# uchun minimal PDF faylini qo'lda yozamiz — brauzer uni to'g'ri ochadi.
+def build_simple_pdf(title, subtitle, description, lines, accent=(37, 99, 235)):
+    """Bir sahifali oddiy PDF. Matn WinAnsi kodlashda yoziladi."""
+    def esc_pdf(s):
+        out = []
+        for ch in (s or ''):
+            if ch in '\\()':
+                out.append('\\' + ch)
+            elif 32 <= ord(ch) <= 126:
+                out.append(ch)
+            elif ch in '‘’':
+                out.append("'")
+            elif ch in '“”':
+                out.append('"')
+            elif ch in '–—':
+                out.append('-')
+            else:
+                out.append('?')
+        return ''.join(out)
+
+    content = []
+    content.append('BT /F2 26 Tf 56 742 Td (%s) Tj ET' % esc_pdf(title))
+    if subtitle:
+        content.append('BT /F1 12 Tf 56 720 Td (%s) Tj ET' % esc_pdf(subtitle))
+    content.append('%.3f %.3f %.3f RG 2 w 56 706 m 540 706 l S' % (accent[0]/255, accent[1]/255, accent[2]/255))
+    y = 676
+    if description:
+        for ln in wrap_text(description, 78)[:6]:
+            content.append('BT /F1 12 Tf 56 %d Td (%s) Tj ET' % (y, esc_pdf(ln)))
+            y -= 18
+        y -= 8
+    for ln in lines[:34]:
+        content.append('BT /F1 11 Tf 56 %d Td (%s) Tj ET' % (y, esc_pdf(ln)))
+        y -= 16
+        if y < 60:
+            break
+    content.append('BT /F1 9 Tf 56 48 Td (O‘quv.uz kutubxonasi - O‘quv.uz LMS) Tj ET'
+                   .replace('‘', "'"))
+    stream = '\n'.join(content).encode('latin-1', 'replace')
+
+    objs = []
+    objs.append(b'<< /Type /Catalog /Pages 2 0 R >>')
+    objs.append(b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>')
+    objs.append(b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] '
+                b'/Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 4 0 R >>')
+    objs.append(b'<< /Length %d >>\nstream\n' % len(stream) + stream + b'\nendstream')
+    objs.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>')
+    objs.append(b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>')
+
+    out = bytearray(b'%PDF-1.4\n')
+    offsets = [0]
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += ('%d 0 obj\n' % i).encode('latin-1') + body + b'\nendobj\n'
+    xref = len(out)
+    out += ('xref\n0 %d\n' % (len(objs) + 1)).encode('latin-1')
+    out += b'0000000000 65535 f \n'
+    for off in offsets[1:]:
+        out += ('%010d 00000 n \n' % off).encode('latin-1')
+    out += ('trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF'
+            % (len(objs) + 1, xref)).encode('latin-1')
+    return bytes(out)
+
+def wrap_text(text, width):
+    words, line, lines = (text or '').split(), '', []
+    for w in words:
+        if len(line) + len(w) + 1 > width:
+            lines.append(line)
+            line = w
+        else:
+            line = (line + ' ' + w).strip()
+    if line:
+        lines.append(line)
+    return lines
+
+@app.route('/api/books/<int:bid>/download', methods=['GET'])
+@jwt_required(optional=True)
+def download_book(bid):
+    book = db.session.get(Book, bid)
+    if not book:
+        return jsonify({"error": "Kitob topilmadi"}), 404
+    raw = (book.description or '').strip()
+    body = [
+        f"Kitob: {book.title}",
+        "",
+        "Tavsif: " + (raw[:400] if raw else 'Tavsif kiritilmagan'),
+        "",
+        "O'quv.uz kutubxonasi",
+    ]
+    pdf = build_simple_pdf(book.title, "O‘quv.uz kutubxonasi", raw, body)
+    safe = re.sub(r'[^A-Za-z0-9_-]+', '_', (book.title or 'kitob'))[:60] or 'kitob'
+    resp = app.response_class(pdf, mimetype='application/pdf')
+    resp.headers['Content-Disposition'] = f'attachment; filename="{safe}.pdf"'
+    resp.headers['Content-Length'] = str(len(pdf))
+    return resp
+
 @app.route('/api/achievements', methods=['GET'])
 def get_achievements():
     achs = Achievement.query.all()
     return jsonify([a.to_dict() for a in achs])
+
+# ══════════════════════════════════════════════════════════════════
+#  MAGAZIN (ballar -> sovg'alar)
+# ══════════════════════════════════════════════════════════════════
+@app.route('/api/shop', methods=['GET'])
+@jwt_required()
+def get_shop():
+    items = ShopItem.query.order_by(ShopItem.id.desc()).all()
+    me = get_current_user()
+    # O'quvchi uchun "meniki" belgisi: nechta ta xarid qilgan
+    bought = {}
+    if me:
+        rows = Purchase.query.filter_by(user_id=me.id).all()
+        for r in rows:
+            bought[r.item_id] = bought.get(r.item_id, 0) + 1
+    data = []
+    for it in items:
+        d = it.to_dict()
+        d['owned'] = bought.get(it.id, 0)
+        data.append(d)
+    return jsonify(data)
+
+@app.route('/api/shop', methods=['POST'])
+@role_required('admin', 'tech_admin', 'director')
+def create_shop_item():
+    data = request.json or {}
+    title = (data.get('title') or '').strip()
+    if not title:
+        return jsonify({"error": "Tovar nomi to'ldirilishi shart"}), 400
+    try:
+        price = int(data.get('price') or 0)
+    except (TypeError, ValueError):
+        price = 0
+    if price < 0:
+        return jsonify({"error": "Narx manfiy bo'lishi mumkin emas"}), 400
+    try:
+        stock = int(data.get('stock') or 0)
+    except (TypeError, ValueError):
+        stock = 0
+    it = ShopItem(
+        title=title,
+        description=(data.get('description') or '').strip(),
+        image=(data.get('image') or '').strip(),
+        emoji=(data.get('emoji') or '').strip()[:8],
+        price=price,
+        stock=max(0, stock),
+        active=bool(data.get('active', True)),
+    )
+    db.session.add(it)
+    db.session.commit()
+    return jsonify(it.to_dict()), 201
+
+@app.route('/api/shop/<int:sid>', methods=['PATCH', 'DELETE'])
+@role_required('admin', 'tech_admin', 'director')
+def edit_shop_item(sid):
+    it = db.session.get(ShopItem, sid)
+    if not it:
+        return jsonify({"error": "Tovar topilmadi"}), 404
+    if request.method == 'DELETE':
+        db.session.delete(it)
+        db.session.commit()
+        return jsonify({"success": True})
+    data = request.json or {}
+    if 'title' in data and (data['title'] or '').strip():
+        it.title = data['title'].strip()
+    if 'description' in data:
+        it.description = (data['description'] or '').strip()
+    if 'image' in data:
+        it.image = (data['image'] or '').strip()
+    if 'emoji' in data:
+        it.emoji = (data['emoji'] or '').strip()[:8]
+    if 'price' in data:
+        try:
+            it.price = max(0, int(data['price'] or 0))
+        except (TypeError, ValueError):
+            pass
+    if 'stock' in data:
+        try:
+            it.stock = max(0, int(data['stock'] or 0))
+        except (TypeError, ValueError):
+            pass
+    if 'active' in data:
+        it.active = bool(data['active'])
+    db.session.commit()
+    return jsonify(it.to_dict())
+
+@app.route('/api/shop/<int:sid>/buy', methods=['POST'])
+@jwt_required()
+def buy_shop_item(sid):
+    me = get_current_user()
+    it = db.session.get(ShopItem, sid)
+    if not it:
+        return jsonify({"error": "Tovar topilmadi"}), 404
+    if not it.active:
+        return jsonify({"error": "Bu tovar vaqtincha sotuvda yo'q"}), 400
+    if it.stock == 0:
+        return jsonify({"error": "Tovar tugagan"}), 400
+    if me.xp < it.price:
+        return jsonify({"error": f"Ballar yetarli emas. Yana {it.price - me.xp} XP kerak."}), 400
+
+    it.stock -= 1
+    me.xp -= it.price
+    db.session.add(Purchase(user_id=me.id, item_id=it.id, title=it.title, price=it.price))
+    db.session.commit()
+    return jsonify({
+        "success": True,
+        "item": it.to_dict(),
+        "points": me.xp,
+        "message": f"“{it.title}” — {it.price} XP sarflandi"
+    })
+
+@app.route('/api/shop/purchases', methods=['GET'])
+@jwt_required()
+def my_purchases():
+    me = get_current_user()
+    rows = Purchase.query.filter_by(user_id=me.id).order_by(Purchase.id.desc()).limit(50).all()
+    return jsonify([r.to_dict() for r in rows])
+
+# ══════════════════════════════════════════════════════════════════
+#  TASDIQLASH (pending -> active / rejected)
+# ══════════════════════════════════════════════════════════════════
+@app.route('/api/users/pending', methods=['GET'])
+@role_required('admin', 'tech_admin', 'director')
+def get_pending_users():
+    users = User.query.filter_by(status='pending').order_by(User.id.desc()).all()
+    return jsonify([u.to_dict() for u in users])
+
+@app.route('/api/users/<int:uid>/status', methods=['PATCH'])
+@role_required('admin', 'tech_admin', 'director')
+def set_user_status(uid):
+    user = db.session.get(User, uid)
+    if not user:
+        return jsonify({"error": "Foydalanuvchi topilmadi"}), 404
+    status = ((request.json or {}).get('status') or '').strip()
+    if status not in ('active', 'rejected', 'pending'):
+        return jsonify({"error": "Noto'g'ri holat"}), 400
+    user.status = status
+    db.session.commit()
+    msg = {
+        'active': "Hisobingiz tasdiqlandi. Endi tizimga kirishingiz mumkin.",
+        'rejected': "Hisobingiz rad etildi. Savollarni administratorga murojaat qiling.",
+        'pending': "Hisobingiz qayta ko'rib chiqilmoqda.",
+    }[status]
+    notify_student(user.id, msg, 'success' if status == 'active' else 'warning')
+    return jsonify(user.to_dict())
 
 # ══════════════════════════════════════════════════════════════════
 #  NOTIFICATIONS
@@ -1198,17 +1548,22 @@ def _as_bool_text(value):
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     # Bot tokeni hamma uchun ochiq bo'lmasligi kerak — faqat admin/tech_admin.
+    # Bu route @jwt_required emas, shuning uchun get_current_user() valid
+    # token yo'qligida xato beradi (va butun endpointga 500 tushirdi) —
+    # shuning uchun optional JWT'dan foydalanamiz.
+    try:
+        verify_jwt_in_request(optional=True)
+        user = get_current_user()
+    except Exception:
+        user = None
     data = {
         "platformName": Setting.get('platformName', "O'quv.uz"),
         "allowRegistration": Setting.get('allowRegistration', 'true') == 'true',
         "collegeLat": Setting.get('college_lat'),
         "collegeLng": Setting.get('college_lng'),
-        "attendanceRadius": int(Setting.get('attendance_radius', '200') or 200),
+        "attendanceRadius": int(Setting.get('attendance_radius', '5000') or 5000),
+        "lessonMinutes": int(Setting.get('lesson_minutes', '20') or 20),
     }
-    try:
-        user = get_current_user()
-    except Exception:
-        user = None
     if user and user.role in ('admin', 'tech_admin'):
         data["telegramBotToken"] = Setting.get('telegram_bot_token', '')
     return jsonify(data)
@@ -1222,9 +1577,30 @@ def update_settings():
     if 'collegeLat' in data: Setting.set('college_lat', str(data['collegeLat']).strip())
     if 'collegeLng' in data: Setting.set('college_lng', str(data['collegeLng']).strip())
     if 'attendanceRadius' in data: Setting.set('attendance_radius', str(data['attendanceRadius']))
+    if 'lessonMinutes' in data:
+        # 1..240 daqiqa
+        try:
+            mins = max(1, min(240, int(data['lessonMinutes'])))
+        except (TypeError, ValueError):
+            mins = 20
+        Setting.set('lesson_minutes', str(mins))
     if 'telegramBotToken' in data: Setting.set('telegram_bot_token', data['telegramBotToken'])
     db.session.commit()
     return get_settings()
+
+def lesson_required_seconds():
+    """Darsni yakunlash uchun kerakli sekundlar (sozlanadi, standart 20 daq).
+
+    Diqqat: chegaralar daqiqada. `max(60, ...)` bu yerda sekund deb
+    o'ylab yozilgan edi va natijada minimal dars uzunligi 1 soat
+    (3600 s) bo'lib ketgandi.
+    """
+    try:
+        mins = int(Setting.get('lesson_minutes', '20') or 20)
+    except (TypeError, ValueError):
+        mins = 20
+    mins = max(1, min(240, mins))
+    return mins * 60
 
 # ══════════════════════════════════════════════════════════════════
 #  XP & DUEL (gamification)
@@ -1297,13 +1673,19 @@ def attendance_checkin():
         return jsonify({"error": "GPS koordinatalari kiritilmadi"}), 400
 
     college_lat, college_lng, radius = get_college_location()
-    if college_lat is None:
-        return jsonify({"error": "Kolledj lokatsiyasi sozlanmagan"}), 400
 
-    distance = haversine_distance(lat, lng, college_lat, college_lng)
-    inside = distance <= radius
+    # Kolledj koordinatasi sozlanmagan bo'lsa, o'quvchini "ga tushirib"
+    # qoldirmaymiz - belgilaymiz, lekin "tekshirilmagan" deb izohlaymiz.
+    # Aks holda geolokatsiya yo'q qurilmada butun funksiya ishlamay qolardi.
+    checked_geo = college_lat is not None
+    distance = None
+    inside = True
+    if checked_geo:
+        distance = haversine_distance(lat, lng, college_lat, college_lng)
+        inside = distance <= radius
 
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    status = 'present' if inside else 'outside'
 
     # Kolledjdan tashqarida bo'lsa "absent" deb yozmaymiz — bu noto'g'ri
     # edi (GPS xatosi ham talabani kelmagan qilib belgilardi).
@@ -1313,19 +1695,55 @@ def attendance_checkin():
             record = Attendance(group_id=user.group_id, date=today, records='{}', reasons='{}')
             db.session.add(record)
         records = json.loads(record.records or '{}')
+        if records.get(str(user.id)) == 'present':
+            db.session.commit()
+            return jsonify({
+                "success": True, "checkedIn": False, "already": True,
+                "status": 'present', "points": user.xp,
+                "message": "Siz bugun allaqachon belgilangansiz"
+            })
         records[str(user.id)] = 'present'
         record.records = json.dumps(records)
+        reasons = json.loads(record.reasons or '{}')
+        reasons[str(user.id)] = ('GPS orqali belgilangan' if checked_geo
+                                 else 'Belgilangan (kolledj koordinatasi sozlanmagan)')
+        record.reasons = json.dumps(reasons)
         db.session.commit()
 
+        # Bir kunlik "kelish" bonusi - o'quvchi qiziqish uchun
+        try:
+            cat = json.loads(user.daily_category_points or '{}')
+        except (TypeError, ValueError):
+            cat = {}
+        if cat.get('checkin') != today:
+            cat['checkin'] = today
+            user.daily_category_points = json.dumps(cat)
+            db.session.commit()
+            add_xp(user, 10, 'other')
+            db.session.commit()
+    elif not inside:
+        status = 'outside'
+    else:
+        status = 'nogroup'
+
+    if status == 'present':
+        msg = ("Keldingiz! Davomat belgilandi. +10 XP" if checked_geo
+               else "Davomat belgilandi. +10 XP (kolledj koordinatasi sozlanmagan)")
+    elif status == 'outside':
+        msg = (f"Kolledj radiusidan tashqaridasiz ({int(distance)}m / {int(radius)}m). "
+               "Davomat belgilanmadi.")
+    else:
+        msg = "Siz biror guruhga biriktirilmagan — davomatni belgilab bo‘lmadi."
+
     return jsonify({
-        "success": True,
-        "status": 'present' if inside else 'outside',
-        "distance": int(distance),
+        "success": status == 'present',
+        "checkedIn": status == 'present',
+        "status": status,
+        "distance": int(distance) if distance is not None else None,
         "radius": int(radius),
         "inside": inside,
-        "message": (f"Masofa: {int(distance)}m. Kolledjdasiz — davomat belgilandi!"
-                    if inside else
-                    f"Masofa: {int(distance)}m. Kolledj radiusidan tashqaridasiz ({int(radius)}m), davomat belgilanmadi.")
+        "points": user.xp,
+        "message": msg
     })
 
 @app.route('/api/attendance/my', methods=['GET'])

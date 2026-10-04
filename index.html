@@ -7,7 +7,7 @@
     <meta name="description" content="O’quv.uz — zamonaviy ta’lim platformasi. Kurslar, darslar, baholar, davomat va reyting.">
     <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/img/icon-180.png">
-    <link rel="stylesheet" href="assets/css/styles.css?v=37">
+    <link rel="stylesheet" href="assets/css/styles.css?v=43">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
     <meta name="mobile-web-app-capable" content="yes">
@@ -151,6 +151,14 @@
                             <span>Email yoki parol xato!</span>
                         </div>
 
+                        <div id="login-pending-card" class="gate-inline hidden">
+                            <i data-lucide="hourglass"></i>
+                            <div>
+                                <b>Tasdiqlash kutilmoqda</b>
+                                <span id="login-pending-msg">Hisobingiz administrator tomonidan tasdiqlanmoqda.</span>
+                            </div>
+                        </div>
+
                         <div class="field">
                             <label class="label" for="log-email">Email</label>
                             <div class="input-icon">
@@ -195,6 +203,14 @@
                         <div id="reg-error-card" class="form-error hidden">
                             <i data-lucide="alert-octagon"></i>
                             <span class="fw-7" id="reg-error-msg">Xatolik</span>
+                        </div>
+
+                        <div id="reg-pending-card" class="gate-inline green hidden">
+                            <i data-lucide="check-circle-2"></i>
+                            <div>
+                                <b>Ariza qabul qilindi</b>
+                                <span>Administrator tasdiqlashini kutilmoqda. Tizimga kirish sahifasiga o‘tmoqdamiz…</span>
+                            </div>
                         </div>
 
                         <div class="field">
@@ -258,11 +274,11 @@
         <div id="modal-content-area" style="position:relative;z-index:1;width:100%;max-width:560px;display:flex;justify-content:center"></div>
     </div>
 
-    <script type="module" src="assets/js/app.js?v=37"></script>
+    <script type="module" src="assets/js/app.js?v=43"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js?v=37').catch(() => {});
+                navigator.serviceWorker.register('/sw.js?v=43').catch(() => {});
             });
         }
     </script>
