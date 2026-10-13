@@ -303,29 +303,117 @@ def get_college_location():
             pass
     return None, None, 5000.0
 
-# ─── Telegram notification helper ────────────────────────────
+# === Telegram integratsiyasi =====================================
 import urllib.request, urllib.error
+import base64
 
-def send_telegram_message(chat_id, text):
-    token = Setting.get('telegram_bot_token')
-    if not token or not chat_id:
-        return
+# Telegram API so'rovlarini bitta joyda yig'amiz: render botimiz HTML
+# teglari bilan yuboradi, lekin foydalanuvchi matni (ism, vazifa matni)
+# "<", ">" yoki "&" belgilarini o'z ichiga olishi mumkin. Eski kodda
+# parse_mode har doim "HTML" edi -> 400 "can't parse entities" -> xabar
+# butunlay yetkazilmasdi.
+_TG_SAFE = re.compile(u"^[\\w\\s.,:;!?\\-()/'\"•·→←°#@+=%$\\[\\]{}\\\\+=]+$", re.U)
+
+
+def tg_escape(text):
+    """Telegram HTML mode uchun xavfsiz matn."""
+    s = text if isinstance(text, str) else str(text or '')
+    if _TG_SAFE.match(s):
+        return s          # teg xavfi yo'q - o'zimiz qo'yadigan teglarni saqlaymiz
+    return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def telegram_token():
+    return (Setting.get('telegram_bot_token') or '').strip()
+
+
+def telegram_bot_username():
+    """Bot username'i (@ bilan) - foydalanuvchiga ulashish uchun."""
+    return (Setting.get('telegram_bot_username') or '').strip().lstrip('@')
+
+
+def _tg_call(method, payload=None, timeout=6):
+    """Telegram API ga so'rov. (muvaffaqiyat, natija) qaytaradi."""
+    token = telegram_token()
+    if not token:
+        return False, {'description': 'Bot tokeni kiritilmagan'}
+    url = "https://api.telegram.org/bot%s/%s" % (token, method)
+    data = json.dumps(payload or {}).encode('utf-8')
+    req = urllib.request.Request(
+        url, data=data,
+        headers={'Content-Type': 'application/json; charset=utf-8'},
+        method='POST')
     try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        data = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=5)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = json.loads(r.read().decode('utf-8'))
+        return bool(body.get('ok')), (body.get('result') or body)
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode('utf-8', 'replace')
+        try:
+            desc = json.loads(raw).get('description') or raw[:160]
+        except ValueError:
+            desc = raw[:160]
+        app.logger.warning('Telegram %s -> HTTP %s: %s', method, e.code, desc)
+        return False, {'description': 'Telegram xatosi (%s): %s' % (e.code, desc)}
+    except Exception as e:
+        # Internet yo'q yoki Telegram bloklangan bo'lishi mumkin.
+        app.logger.warning('Telegram %s ulanmadi: %s', method, e)
+        return False, {'description': 'Ulanish xatosi: %s' % e}
+
+
+def send_telegram_message(chat_id, text, silent=False):
+    """Xabar yuboradi. (yuborildi, xato) qaytaradi."""
+    if not chat_id:
+        return False, 'chat_id kiritilmagan'
+    if not telegram_token():
+        return False, 'Bot tokeni sozlanmagan'
+    header = u'\U0001f3e0  <b>O\u2018quv.uz</b>'
+    ok, res = _tg_call('sendMessage', {
+        'chat_id': str(chat_id),
+        'text': tg_escape(header + u'\n\n' + str(text)),
+        'parse_mode': 'HTML',
+        'disable_web_page_preview': True,
+    })
+    if ok:
+        return True, None
+    # Formatlash xabarni to'xtatgan bo'lsa, oddiy matn bilan qayta urinamiz
+    ok2, res2 = _tg_call('sendMessage', {
+        'chat_id': str(chat_id),
+        'text': str(text),
+        'disable_web_page_preview': True,
+    })
+    if ok2:
+        return True, None
+    return False, (res2.get('description') if isinstance(res2, dict) else str(res2))
+
+
+def tg_bind_code(user_id):
+    """Foydalanuvchiga beriladigan qisqa bog'lash kodi."""
+    raw = str(int(user_id)).encode('ascii')
+    return 'oq' + base64.urlsafe_b64encode(raw).decode('ascii').rstrip('=')
+
+
+def tg_user_from_code(code):
+    code = str(code or '').strip()
+    if not code.startswith('oq'):
+        return None
+    body = code[2:]
+    try:
+        body += '=' * (-len(body) % 4)
+        return int(base64.urlsafe_b64decode(body.encode('ascii')).decode('ascii'))
     except Exception:
-        pass
+        return None
+
 
 def notify_student(student_id, msg, ntype='warning'):
-    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')
-    notif = Notification(user_id=student_id, msg=msg, date=now_str, type=ntype, seen=False)
+    now_str = utcnow().strftime('%Y-%m-%d %H:%M')
+    notif = Notification(user_id=student_id, msg=msg, date=now_str,
+                         type=ntype, seen=False)
     db.session.add(notif)
     db.session.commit()
-    student = User.query.get(student_id)
-    if student:
-        send_telegram_message(student.telegram_chat_id, f"O'quv.uz: {msg}")
+    student = db.session.get(User, student_id)
+    if student and student.telegram_chat_id:
+        send_telegram_message(student.telegram_chat_id, msg)
 
 # ─── Serve Static ────────────────────────────────────────────────
 @app.route('/')
@@ -1564,8 +1652,11 @@ def get_settings():
         "attendanceRadius": int(Setting.get('attendance_radius', '5000') or 5000),
         "lessonMinutes": int(Setting.get('lesson_minutes', '20') or 20),
     }
+    # Telegram holati - login sahifasidagi "Telegram orqali kirish" uchun ham kerak
+    data["telegramBotEnabled"] = bool(telegram_token() and telegram_bot_username())
     if user and user.role in ('admin', 'tech_admin'):
         data["telegramBotToken"] = Setting.get('telegram_bot_token', '')
+        data["telegramBotUsername"] = telegram_bot_username()
     return jsonify(data)
 
 @app.route('/api/settings', methods=['PATCH'])
@@ -1584,7 +1675,11 @@ def update_settings():
         except (TypeError, ValueError):
             mins = 20
         Setting.set('lesson_minutes', str(mins))
-    if 'telegramBotToken' in data: Setting.set('telegram_bot_token', data['telegramBotToken'])
+    if 'telegramBotToken' in data:
+        Setting.set('telegram_bot_token', (data['telegramBotToken'] or '').strip())
+    if 'telegramBotUsername' in data:
+        uname = (data['telegramBotUsername'] or '').strip().lstrip('@').strip()
+        Setting.set('telegram_bot_username', uname)
     db.session.commit()
     return get_settings()
 
@@ -1665,18 +1760,62 @@ def send_staff_chat():
 @app.route('/api/attendance/checkin', methods=['POST'])
 @jwt_required()
 def attendance_checkin():
-    user = get_current_user()
-    data = request.json
-    lat = data.get('lat')
-    lng = data.get('lng')
-    if lat is None or lng is None:
-        return jsonify({"error": "GPS koordinatalari kiritilmadi"}), 400
+    """Davomatga belgilash.
 
+    Ikki yo'l bor:
+      * GPS orqali (`lat`/`lng`) - asosiy va ishonchli yo'l;
+      * qo'lda (`manual` + `reason`) - GPS yo'q joyda (kompyuter, yopiq
+        bino, eski telefon). Sabab yoziladi va o'quvchining darsdagi
+        ishonchlilik ko'rsatkichi pasaytiriladi.
+    """
+    user = get_current_user()
+    data = request.json or {}
+    today = utcnow().strftime('%Y-%m-%d')
     college_lat, college_lng, radius = get_college_location()
+
+    # ── Manual belgilash ────────────────────────────────────────────
+    if data.get('manual'):
+        reason = (data.get('reason') or '').strip()
+        if len(reason) < 4:
+            return jsonify({"error": "Sababni yozib bering (kamida 4 ta belgi)",
+                            "status": "noreason"}), 400
+        if not user.group_id:
+            return jsonify({"error": "Siz biror guruhga biriktirilmagan",
+                            "status": "nogroup"}), 400
+        record = _attendance_today_record(user.group_id, today)
+        records = json.loads(record.records or '{}')
+        if records.get(str(user.id)) in ('present', 'manual'):
+            db.session.commit()
+            return jsonify({"success": True, "checkedIn": False, "already": True,
+                            "status": records.get(str(user.id)), "points": user.xp,
+                            "message": "Siz bugun allaqachon belgilangansiz"})
+        records[str(user.id)] = 'manual'
+        record.records = json.dumps(records)
+        reasons = json.loads(record.reasons or '{}')
+        reasons[str(user.id)] = u'\u0421\u0430\u0431\u0430\u0431: ' + reason[:180]
+        record.reasons = json.dumps(reasons)
+        db.session.commit()
+        gained = _checkin_bonus(user, today)
+        return jsonify({"success": True, "checkedIn": True, "status": "manual",
+                        "manual": True, "points": user.xp, "bonus": gained,
+                        "message": u"Qo\u2018lda belgilandi. Sababingiz o\u2018qituvchiga ko\u2018rinadi." +
+                                   (u" +%d XP" % gained if gained else "")})
+
+    # ── GPS orqali ──────────────────────────────────────────────────
+    try:
+        lat = float(data.get('lat'))
+        lng = float(data.get('lng'))
+    except (TypeError, ValueError):
+        return jsonify({"error": "GPS koordinatalari noto\u2018g\u2018ri",
+                        "status": "nogeo"}), 400
+    accuracy = data.get('accuracy')
+    try:
+        accuracy = float(accuracy)
+    except (TypeError, ValueError):
+        accuracy = None
 
     # Kolledj koordinatasi sozlanmagan bo'lsa, o'quvchini "ga tushirib"
     # qoldirmaymiz - belgilaymiz, lekin "tekshirilmagan" deb izohlaymiz.
-    # Aks holda geolokatsiya yo'q qurilmada butun funksiya ishlamay qolardi.
     checked_geo = college_lat is not None
     distance = None
     inside = True
@@ -1684,56 +1823,58 @@ def attendance_checkin():
         distance = haversine_distance(lat, lng, college_lat, college_lng)
         inside = distance <= radius
 
-    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-    status = 'present' if inside else 'outside'
+    # Telefon yopiq binoda yoki eski modelda GPS koordinatani yuzlab
+    # metr xat bilan topadi. Bunday aniqlik bilan avtomatik "Keldi"
+    # qo'yish noto'g'ri: o'quvchi kolledjdan 10 km bo'lsa ham "keldi"
+    # bo'lib chiqardi. Aksincha - aniq tushuntirish berib, qayta urinish
+    # yoki qo'lda belgilashga yo'naltiramiz.
+    low_accuracy = bool(accuracy and accuracy > 300)
+    unreliable = bool(low_accuracy and not inside and distance is not None)
 
-    # Kolledjdan tashqarida bo'lsa "absent" deb yozmaymiz — bu noto'g'ri
-    # edi (GPS xatosi ham talabani kelmagan qilib belgilardi).
-    if inside and user.group_id:
-        record = Attendance.query.filter_by(group_id=user.group_id, date=today).first()
-        if not record:
-            record = Attendance(group_id=user.group_id, date=today, records='{}', reasons='{}')
-            db.session.add(record)
+    if not inside:
+        status = 'unreliable' if unreliable else 'outside'
+    elif not user.group_id:
+        status = 'nogroup'
+    else:
+        status = 'present'
+
+    if status == 'present':
+        record = _attendance_today_record(user.group_id, today)
         records = json.loads(record.records or '{}')
-        if records.get(str(user.id)) == 'present':
+        if records.get(str(user.id)) in ('present', 'manual'):
             db.session.commit()
-            return jsonify({
-                "success": True, "checkedIn": False, "already": True,
-                "status": 'present', "points": user.xp,
-                "message": "Siz bugun allaqachon belgilangansiz"
-            })
+            return jsonify({"success": True, "checkedIn": False, "already": True,
+                            "status": records.get(str(user.id)), "points": user.xp,
+                            "distance": int(distance) if distance is not None else None,
+                            "radius": int(radius),
+                            "message": "Siz bugun allaqachon belgilangansiz"})
         records[str(user.id)] = 'present'
         record.records = json.dumps(records)
         reasons = json.loads(record.reasons or '{}')
-        reasons[str(user.id)] = ('GPS orqali belgilangan' if checked_geo
-                                 else 'Belgilangan (kolledj koordinatasi sozlanmagan)')
+        note = 'GPS orqali belgilangan'
+        if low_accuracy:
+            note += u' (aniqlik past: \u00b1%d m)' % int(accuracy or 0)
+        elif not checked_geo:
+            note = 'Belgilangan (kolledj koordinatasi sozlanmagan)'
+        reasons[str(user.id)] = note
         record.reasons = json.dumps(reasons)
         db.session.commit()
-
-        # Bir kunlik "kelish" bonusi - o'quvchi qiziqish uchun
-        try:
-            cat = json.loads(user.daily_category_points or '{}')
-        except (TypeError, ValueError):
-            cat = {}
-        if cat.get('checkin') != today:
-            cat['checkin'] = today
-            user.daily_category_points = json.dumps(cat)
-            db.session.commit()
-            add_xp(user, 10, 'other')
-            db.session.commit()
-    elif not inside:
-        status = 'outside'
-    else:
-        status = 'nogroup'
+        gained = _checkin_bonus(user, today)
 
     if status == 'present':
-        msg = ("Keldingiz! Davomat belgilandi. +10 XP" if checked_geo
-               else "Davomat belgilandi. +10 XP (kolledj koordinatasi sozlanmagan)")
+        msg = ("Keldingiz! Davomat belgilandi. +%d XP" % gained if gained
+               else "Keldingiz! Davomat belgilandi (bugungi kunlik XP limiti tugagan).")
+        if low_accuracy:
+            msg += u' Joylashuv aniqligi past (\u00b1%d m) \u2014 ilovaning ruxsatini tekshiring.' % int(accuracy or 0)
+    elif status == 'unreliable':
+        msg = (u"Joylashuv juda noaniq (±%d m) — bu yerda ekanligingizni isbotlash mumkin emas. "
+               u"Qayta urinib ko'ring yoki \u00abQo'lda\u00bb tugmasi bilan sabab yozib belgilang."
+               % int(accuracy or 0))
     elif status == 'outside':
-        msg = (f"Kolledj radiusidan tashqaridasiz ({int(distance)}m / {int(radius)}m). "
-               "Davomat belgilanmadi.")
+        msg = (u"Kolledj radiusidan tashqaridasiz (%d m / %d m). Davomat belgilanmadi."
+               % (int(distance or 0), int(radius)))
     else:
-        msg = "Siz biror guruhga biriktirilmagan — davomatni belgilab bo‘lmadi."
+        msg = "Siz biror guruhga biriktirilmagan \u2014 davomatni belgilab bo\u2018lmadi."
 
     return jsonify({
         "success": status == 'present',
@@ -1742,8 +1883,54 @@ def attendance_checkin():
         "distance": int(distance) if distance is not None else None,
         "radius": int(radius),
         "inside": inside,
+        "accuracy": int(accuracy) if accuracy else None,
+        "lowAccuracy": low_accuracy,
+        "unreliable": unreliable,
+        "geoChecked": checked_geo,
+        "bonus": gained if status == 'present' else 0,
         "points": user.xp,
-        "message": msg
+        "message": msg,
+    })
+
+
+def _attendance_today_record(group_id, today):
+    """Bugungi kunga mos Attendance yozuvini topadi yoki yaratadi."""
+    record = Attendance.query.filter_by(group_id=group_id, date=today).first()
+    if not record:
+        record = Attendance(group_id=group_id, date=today, records='{}', reasons='{}')
+        db.session.add(record)
+    return record
+
+
+def _checkin_bonus(user, today):
+    """Bir kunlik kelish bonusi (faqat bir marta).
+
+    Diqqat: `add_xp` kunlik limit bo'yicha kesadi va o'sha holatda 0
+    qaytaradi. Eski kod baribir `10` qaytarardi - o'quvchiga "+10 XP"
+    ko'rsatilardi, ammo ball qo'shilmagan bo'lardi. Endi haqiqiy
+    qo'shilgan miqdorni qaytaramiz.
+    """
+    try:
+        cat = json.loads(user.daily_category_points or '{}')
+    except (TypeError, ValueError):
+        cat = {}
+    if cat.get('checkin') == today:
+        return 0
+    cat['checkin'] = today
+    user.daily_category_points = json.dumps(cat)
+    db.session.commit()
+    gained, _msg = add_xp(user, 10, 'other')
+    db.session.commit()
+    return gained
+
+
+@app.route('/api/attendance/geo-info')
+def attendance_geo_info():
+    """Belgilash kartasi uchun kolledj koordinatasi va radius."""
+    college_lat, college_lng, radius = get_college_location()
+    return jsonify({
+        "lat": college_lat, "lng": college_lng, "radius": int(radius),
+        "configured": college_lat is not None,
     })
 
 @app.route('/api/attendance/my', methods=['GET'])
@@ -2006,14 +2193,127 @@ def get_parent_child_report():
 @app.route('/api/telegram/bind', methods=['POST'])
 @jwt_required()
 def bind_telegram():
+    """Eski usul: chat_id'ni qo'lda kiritish. Hali saqlanadi (zaxira)."""
     user = get_current_user()
-    data = request.json
-    chat_id = data.get('chatId', '')
-    user.telegram_chat_id = str(chat_id) if chat_id else None
+    data = request.json or {}
+    chat_id = str(data.get('chatId') or '').strip()
+    if chat_id and not re.match(r'^-?\d+$', chat_id):
+        return jsonify({"error": "Chat ID faqat raqamlardan iborat bo'lishi kerak"}), 400
+    user.telegram_chat_id = chat_id or None
+    db.session.commit()
+    return jsonify({"success": True, "chatId": user.telegram_chat_id})
+
+
+@app.route('/api/telegram/link-info')
+@jwt_required()
+def telegram_link_info():
+    """Profil uchun: bot linki, o'z kodi, joriy holati."""
+    user = get_current_user()
+    username = telegram_bot_username()
+    code = tg_bind_code(user.id)
+    return jsonify({
+        "botUsername": username,
+        "code": code,
+        "botLink": ("https://t.me/%s?start=%s" % (username, code)) if username else "",
+        "chatId": user.telegram_chat_id or "",
+        "linked": bool(user.telegram_chat_id),
+        "tokenSet": bool(telegram_token()),
+    })
+
+
+@app.route('/api/telegram/test', methods=['POST'])
+@role_required('admin', 'tech_admin')
+def telegram_test():
+    """Token haqiqiy ekanini tekshiradi va (ixtiyoriy) xabar yuboradi."""
+    if not telegram_token():
+        return jsonify({"success": False,
+                        "message": "Avval bot tokenini kiriting"}), 400
+    ok, res = _tg_call('getMe')
+    if not ok:
+        return jsonify({"success": False,
+                        "message": res.get('description') if isinstance(res, dict) else str(res)}), 400
+    bot = res if isinstance(res, dict) else {}
+    info = {
+        "success": True,
+        "message": "Bot ulandi: @%s (%s)" % (bot.get('username', '?'), bot.get('first_name', '?')),
+        "username": bot.get('username', ''),
+        "botName": bot.get('first_name', ''),
+    }
+    body = (request.json or {}).get('chatId')
+    if body:
+        sent, err = send_telegram_message(body,
+                                           "Test xabar. O'quv.uz Telegram integratsiyasi ishlayapti.")
+        info["sent"] = sent
+        info["sentMessage"] = err or "Xabar yuborildi"
+        if not sent:
+            return jsonify(info), 400
+    return jsonify(info)
+
+
+@app.route('/api/telegram/webhook/<token>', methods=['POST'])
+def telegram_webhook(token):
+    """Telegram bot'ining xabarlar qabul qiladigan nuqtasi.
+
+    Foydalanuvchi /start bosganda uning chat_id'si sayt kodiga bog'lanadi.
+    Telegram webhook'ni `bot<TOKEN>/setWebhook` orqali ulash kerak.
+    """
+    if token != telegram_token():
+        return jsonify({"ok": False, "error": "bad token"}), 403
+    try:
+        update = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        update = {}
+
+    def reply(text, keyboard=None):
+        return _tg_call('sendMessage', dict({
+            'chat_id': update.get('message', {}).get('chat', {}).get('id'),
+            'text': text,
+            'parse_mode': 'HTML',
+        }, **(keyboard or {})))
+
+    msg = update.get('message') or {}
+    chat = msg.get('chat') or {}
+    chat_id = chat.get('id')
+    text = (msg.get('text') or '').strip()
+
+    if text.startswith('/start'):
+        code = (msg.get('text') or '').split()[1] if len((msg.get('text') or '').split()) > 1 else ''
+        uid = tg_user_from_code(code)
+        if uid and chat_id:
+            user = db.session.get(User, uid)
+            if user:
+                user.telegram_chat_id = str(chat_id)
+                db.session.commit()
+                reply(u'\u2705 <b>Bog\u2018landi!</b>\n'
+                      u'Siz endi O\u2018quv.uz tizimidagi bildirishnomalarni shu yerga olasiz. '
+                      u'Saytdagi "Profil \u2192 Telegram" qismida holat "Bog\u2018langan" bo\u2018lib ko\u2018rinadi.')
+                return jsonify({"ok": True})
+            reply(u'\u274c Bu akkaunt topilmadi.')
+            return jsonify({"ok": True})
+        reply(u'Saytdan "Profil \u2192 Telegram" qismidagi havolani bosib, '
+              u'keyin shu yerga /start yozing.')
+    elif text in ('/help', '/start'):
+        reply(u'O\u2018quv.uz bot:\n'
+              u'  /start <kod> \u2014 sayt akkauntingizni bog\u2018lash\n'
+              u'  /help \u2014 yordam')
+    elif chat_id:
+        # Foydalanuvchi chat_id'si o'zgartirsa (Telegram'da) qayta bog'lash.
+        uid = tg_user_from_code((text or '').strip())
+        if uid and uid:
+            user = db.session.get(User, uid)
+            if user:
+                user.telegram_chat_id = str(chat_id)
+                db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route('/api/telegram/unbind', methods=['POST'])
+@jwt_required()
+def telegram_unbind():
+    user = get_current_user()
+    user.telegram_chat_id = None
     db.session.commit()
     return jsonify({"success": True})
-
-# ══════════════════════════════════════════════════════════════════
 #  NOTIFICATIONS
 # ══════════════════════════════════════════════════════════════════
 

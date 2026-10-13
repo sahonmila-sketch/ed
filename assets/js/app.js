@@ -3972,92 +3972,228 @@ window.__svComment = async (e, id) => {
 // ══════════════════════════════════════════════════════════════════════
 //  Views: profile
 // ══════════════════════════════════════════════════════════════════════
-// ─── Check-in kartasi (GPS orqali) ──────────────────────────────────
-function checkinCard(done) {
+// \u2500\u2500\u2500 Check-in kartasi (GPS orqali) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Eski versiya juda sodda edi: bitta tugma, xato bo'lsa umuman
+// tushuntirish yo'q, "qayta urinish" ham yo'q. Endi o'quvchi aniq
+// masofani, GPS aniqligini va radiusni ko'radi.
+const GEO_CACHE_KEY = 'oquv_last_geo';
+
+function geoCached() {
+    try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || 'null'); }
+    catch (e) { return null; }
+}
+
+function checkinCard(done, info) {
     if (done) {
+        const bonus = info && info.bonus;
         return `
         <section class="checkin-card done">
             <div class="checkin-icon"><i data-lucide="check"></i></div>
             <div class="grow">
-                <h3 class="t-lg fw-9">Bugun keldingiz! 🎉</h3>
-                <p class="c-muted t-sm mt-1">Davomatingiz “Keldi” deb belgilandi. Bugungi kun uchun +10 XP.</p>
+                <h3 class="t-lg fw-9">Bugun keldingiz! \uD83C\uDF89</h3>
+                <p class="c-muted t-sm mt-1">Davomatingiz <b>Keldi</b> deb belgilandi${bonus ? ` va +${bonus} XP olindi` : ''}.</p>
             </div>
             <span class="badge badge-green"><i data-lucide="user-check"></i> Keldi</span>
         </section>`;
     }
+    const c = geoCached() || {};
+    const hasGeo = !!c.dist || !!c.when;
     return `
-    <section class="checkin-card">
-        <div class="checkin-icon"><i data-lucide="map-pin"></i></div>
+    <section class="checkin-card" id="checkin-card">
+        <div class="checkin-icon" id="checkin-icon"><i data-lucide="map-pin"></i></div>
         <div class="grow">
             <h3 class="t-lg fw-9">Bugun keldingizmi?</h3>
             <p class="c-muted t-sm mt-1">
-                Telefonda <b>geolokatsiyani yoqing</b> va tugmani bosing — biz
-                kolledj hududida ekaningizni tekshirib, davomatni o‘zimiz qo‘yamiz.
+                Joylashuvni aniqlab, kolledj hududida ekaningizni tekshiramiz.
+                Telefonda avval <b>geolokatsiya ruxsatini</b> yoqing.
             </p>
+
+            <div class="geo-readout" id="geo-readout" ${hasGeo ? '' : 'hidden'}>
+                <div class="geo-ring" id="geo-ring" style="--p:${Math.min(100, c.pct || 0)}">
+                    <span id="geo-ring-num">${Math.round(c.pct || 0)}%</span>
+                    <small>radius</small>
+                </div>
+                <div class="grow">
+                    <div class="geo-line"><i data-lucide="map-pin"></i>
+                        <span id="geo-dist">${Math.round(c.dist || 0)} m</span>
+                        <span class="c-muted" id="geo-radius-text">/ ${Math.round(c.radius || 0)} m radius</span>
+                    </div>
+                    <div class="geo-line"><i data-lucide="satellite"></i>
+                        <span>GPS aniqligi: <b id="geo-acc">${Math.round(c.acc || 0)} m</b></span>
+                    </div>
+                    <div class="geo-line"><i data-lucide="clock"></i>
+                        <span class="c-muted" id="geo-time">${esc(c.when || '')}</span>
+                    </div>
+                </div>
+            </div>
+
             <div class="d-flex gap-2 mt-4 flex-wrap">
-                <button class="btn btn-primary" id="checkin-btn" onclick="window.__checkIn(this)">
+                <button class="btn btn-primary" id="checkin-btn" onclick="window.__checkIn()">
                     <i data-lucide="navigation"></i> Kelishimni belgilash
                 </button>
-                <span class="t-xs c-muted" id="checkin-hint" style="align-self:center"></span>
+                <button class="btn btn-soft" id="checkin-retry" onclick="window.__checkIn(true)" hidden>
+                    <i data-lucide="refresh-cw"></i> Qayta
+                </button>
+                <button class="btn btn-ghost" id="checkin-manual" onclick="window.__manualCheckIn()">
+                    <i data-lucide="hand"></i> Qo\u2018lda
+                </button>
             </div>
+            <div class="t-xs c-muted mt-2" id="checkin-hint">${hasGeo ? 'Oxirgi joylashuvni ko‘rsatilgan. Belgilash uchun tugmani bosing.' : ''}</div>
         </div>
     </section>`;
 }
 
-window.__checkIn = async (btn) => {
+function geoSave(dist, radius, acc, pct) {
+    try {
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify({
+            dist: dist || 0, radius: radius || 0, acc: acc || 0,
+            pct: pct || 0,
+            when: new Date().toLocaleString('uz-UZ', { hour: '2-digit', minute: '2-digit' }) + ' da',
+        }));
+    } catch (e) { /* localStorage yopiq bo'lishi mumkin */ }
+}
+
+window.__checkIn = async (retry) => {
+    const btn = document.getElementById('checkin-btn');
+    const retryBtn = document.getElementById('checkin-retry');
     const hint = document.getElementById('checkin-hint');
-    const say = (t) => { if (hint) hint.textContent = t; };
+    const say = (t) => { if (hint) hint.textContent = t || ''; };
+    const busy = (on) => {
+        if (!btn) return;
+        btn.disabled = on;
+        btn.innerHTML = on
+            ? '<span class="spinner" style="width:15px;height:15px"></span> Aniqlanmoqda\u2026'
+            : '<i data-lucide="navigation"></i> Kelishimni belgilash';
+        safeLucide(btn);
+        if (retryBtn) retryBtn.disabled = on;
+    };
 
     if (!navigator.geolocation) {
-        say('Bu brauzer geolokatsiyani qo‘llamaydi.');
-        showToast('Geolokatsiya mavjud emas', 'error');
+        say('Bu brauzer geolokatsiyani qo\u2018llamaydi.');
+        showToast('Geolokatsiya mavjud emas \u2014 qo\u2018lda belgilash mumkin', 'warn');
+        if (btn) btn.hidden = true;
         return;
     }
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Joylashuv aniqlanmoqda…';
-    say('Ruxsat so‘ralmoqda…');
+    busy(true);
+    say('Ruxsat so\u2018ralmoqda\u2026');
 
     navigator.geolocation.getCurrentPosition(async (pos) => {
+        const acc = pos.coords.accuracy || 0;
         try {
             const res = await api_post('/attendance/checkin', {
-                lat: pos.coords.latitude, lng: pos.coords.longitude,
-                accuracy: pos.coords.accuracy,
+                lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc,
             });
+            const pct = res.radius ? Math.min(100, (res.distance / res.radius) * 100) : 0;
+            geoSave(res.distance, res.radius, acc, pct);
+            __geoPaint(res, acc);
+
             if (res.checkedIn) {
-                showToast(res.message || 'Keldingiz! Davomat qo‘shildi', 'success');
+                showToast(res.message || 'Keldingiz! Davomat qo\u2018shildi', 'success');
                 if (res.points) { STATE.user.points = res.points; localStorage.setItem('lms_user', JSON.stringify(STATE.user)); updateHeaderUser(); }
                 renderView('profile');
             } else {
                 say(res.message || 'Kolledj hududida emasiniz');
                 showToast(res.message || 'Kolledj hududida emasiniz', 'warn');
-                btn.disabled = false;
-                btn.innerHTML = '<i data-lucide="navigation"></i> Kelishimni belgilash';
-                safeLucide(btn);
+                busy(false);
+                if (retryBtn) retryBtn.hidden = false;
+                if (acc > 300) {
+                    say(`${res.message || ''} Aniqlik past (\u00b1${Math.round(acc)} m) \u2014 qayta urinib ko\u2018ring yoki qo\u2018lda belgilang.`.trim());
+                }
             }
         } catch (e) {
             say(e.message);
             showToast(e.message, 'error');
-            btn.disabled = false;
-            btn.innerHTML = '<i data-lucide="navigation"></i> Kelishimni belgilash';
-            safeLucide(btn);
+            busy(false);
+            if (retryBtn) retryBtn.hidden = false;
         }
     }, (err) => {
         const msg = err.code === 1
-            ? 'Ruxsat rad etildi. Brauzer sozlamasidan geolokatsiyani yoqing.'
-            : 'Joylashuvni aniqlab bo‘lmadi. GPS yoqiqmi?';
+            ? 'Ruxsat rad etildi. Brauzer sozlamasida geolokatsiyani yo\u2018qing \u2014 brauzer nomi yonidash quyida belgi.'
+            : (err.code === 3 ? 'Geolokatsiya vaqti o\u2018tdi. Signal yo\u2018q bo\u2018lishi mumkin.'
+                               : 'Joylashuvni aniqlab bo\u2018lmadi. GPS yo\u2018qiqmi?');
         say(msg);
         showToast(msg, 'warn');
-        btn.disabled = false;
-        btn.innerHTML = '<i data-lucide="navigation"></i> Kelishimni belgilash';
-        safeLucide(btn);
-    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+        busy(false);
+        if (retryBtn) retryBtn.hidden = false;
+        if (retryBtn) retryBtn.click();
+    }, {
+        // Kesh: 30 sekund ichida GPS o\u2018zgarishi kam. Eski cache (60 s)
+        // "qayta urinib ko\u2018ring" tugmasini ma'nosiz qilardi.
+        enableHighAccuracy: true, timeout: 20000, maximumAge: 30000,
+    });
+};
+
+function __geoPaint(res, acc) {
+    const box = document.getElementById('geo-readout');
+    if (box) box.hidden = false;
+    const pct = res.radius ? Math.min(100, (res.distance / res.radius) * 100) : 0;
+    const ring = document.getElementById('geo-ring');
+    if (ring) {
+        ring.style.setProperty('--p', pct.toFixed(0));
+        ring.classList.toggle('over', !res.inside);
+    }
+    const num = document.getElementById('geo-ring-num');
+    if (num) num.textContent = Math.round(pct) + '%';
+    const d = document.getElementById('geo-dist');
+    if (d) d.textContent = res.distance != null ? `${res.distance} m` : 'noma\u2018lum';
+    const rt = document.getElementById('geo-radius-text');
+    if (rt) rt.textContent = res.radius ? `/ ${res.radius} m radius` : '';
+    const a = document.getElementById('geo-acc');
+    if (a) a.textContent = acc ? `\u00b1${Math.round(acc)} m` : 'noma\u2018lum';
+    const icon = document.getElementById('checkin-icon');
+    if (icon) icon.innerHTML = res.inside
+        ? '<i data-lucide="map-pin-check"></i>' : '<i data-lucide="map-pin-off"></i>';
+    safeLucide(icon);
+}
+
+window.__manualCheckIn = () => {
+    openModal(modalShell({
+        title: 'Qo\u2018lda belgilash',
+        icon: 'hand',
+        body: `
+            <p class="c-muted t-sm" style="margin:0 0 14px">
+                Agar GPS ishlamasa (kompyuterda, yopiq binoda yoki eski telefonda),
+                sababni yozib qo\u2018lda belgilashingiz mumkin. Sabab o\u2018qituvchingizga
+                ko\u2018rinadi \u2014 so\u2018z qilmasdan yozmay qo\u2018yishingiz tavsiya etilmaydi.
+            </p>
+            <form id="manual-checkin-form" class="field">
+                <label class="label">Sabab</label>
+                <input class="input" name="reason" required minlength="4" maxlength="180"
+                       placeholder="Masalan: Wi-Fi routeri interneti yo\u2018q, GPS signal yo\u2018q">
+                <div class="form-hint mt-1">Kamida 4 ta belgi.</div>
+            </form>`,
+        footer: `
+            <button class="btn btn-ghost" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="window.__saveManualCheckIn()">
+                <i data-lucide="check"></i> Belgilash
+            </button>`,
+    }));
+    setTimeout(() => {
+        const i = document.querySelector('#manual-checkin-form input[name="reason"]');
+        if (i) i.focus();
+    }, 60);
+};
+
+window.__saveManualCheckIn = async () => {
+    const form = document.getElementById('manual-checkin-form');
+    const reason = (form?.querySelector('input[name="reason"]')?.value || '').trim();
+    if (reason.length < 4) { showToast('Sababni yozib bering (kamida 4 ta belgi)', 'error'); return; }
+    try {
+        const res = await api_post('/attendance/checkin', { manual: true, reason });
+        cModal();
+        showToast(res.message || 'Qo\u2018lda belgilandi', 'success');
+        if (res.points) { STATE.user.points = res.points; localStorage.setItem('lms_user', JSON.stringify(STATE.user)); updateHeaderUser(); }
+        renderView('profile');
+    } catch (e) { showToast(e.message, 'error'); }
 };
 
 async function v_profile() {
     const u = STATE.user;
     const s = userStats(u);
+    // Telegram holati (deep-link kodi) kartaga kirishidan oldin yuklanadi.
     const [achs, courses, myAtt] = await Promise.all([
         getAchievements(), getCourses().catch(() => []), getMyAttendance().catch(() => []),
+        window.__loadTgInfo(),
     ]);
     const unlocked = u.achievements || [];
     // Bugungi kunlik belgi: o'quvchi allaqachon kelganmi?
@@ -4068,7 +4204,7 @@ async function v_profile() {
     return `
         ${pageHead('Profil', 'Akkauntingizni boshqaring')}
 
-        ${isStudent ? checkinCard(checkedIn) : ''}
+        ${isStudent ? checkinCard(checkedIn, myAtt && myAtt[today]) : ''}
 
         <div class="split split-2">
             <div class="stack">
@@ -4105,20 +4241,7 @@ async function v_profile() {
                         <button class="btn btn-primary"><i data-lucide="save"></i> Saqlash</button>
                     </form>`, { icon: '<i data-lucide="user-cog"></i>' })}
 
-                ${sectionCard('Telegram', `
-                    <div class="stack-sm">
-                        <div class="d-flex items-center gap-3">
-                            <div class="card-icon" style="background:#eaf4ff;color:#229ed9"><i data-lucide="send"></i></div>
-                            <div class="grow">
-                                <div class="fw-8 t-base">${u.telegramChatId ? 'Bog‘langan' : 'Bog‘lanmagan'}</div>
-                                <div class="t-xs c-muted">${u.telegramChatId ? esc(u.telegramChatId) : 'Bildirishnomalar Telegram orqali olish uchun'}</div>
-                            </div>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <input class="input grow" id="tg-chat" placeholder="Telegram chat ID">
-                            <button class="btn btn-soft" onclick="window.__bindTelegram()"><i data-lucide="link"></i></button>
-                        </div>
-                    </div>`, { icon: '<i data-lucide="send"></i>' })}
+${telegramCard(u)}
             </div>
 
             <div class="stack">
@@ -4195,10 +4318,78 @@ window.__uploadAvatar = async (input) => {
     reader.readAsDataURL(file);
 };
 
+// \u2500\u2500\u2500 Telegram kartasi (profil) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Eski usul \u2014 chat ID\u2019ni qo\u2018lda kiritish \u2014 real foydalanuvchilar
+// hech qachon ishlatmagan. Endi bot havolasi orqali bir tugma bosiladi.
+let _tgInfo = null;
+
+function telegramCard(u) {
+    const info = _tgInfo || {};
+    const linked = !!info.linked || !!u.telegramChatId;
+    const noBot = info.tokenSet === false && !info.botUsername;
+    return sectionCard('Telegram', `
+        <div class="stack-sm">
+            <div class="d-flex items-center gap-3">
+                <div class="card-icon" style="background:#e8f4fd;color:#1f8fc4"><i data-lucide="send"></i></div>
+                <div class="grow">
+                    <div class="fw-8 t-base">${linked ? 'Bog\u2018langan' : 'Bog\u2018lanmagan'}</div>
+                    <div class="t-xs c-muted">${linked
+                        ? (info.chatId ? 'Chat ID: ' + esc(info.chatId) : 'Bildirishnomalar Telegram orqali keladi')
+                        : (noBot ? 'Bot hali sozlanmagan \u2014 administratorga murojaat qiling'
+                                  : 'Baholar, davomat va xabarlar shu yerda keladi')}</div>
+                </div>
+                ${linked ? '<span class="badge badge-green"><i data-lucide="check"></i> Faol</span>' : ''}
+            </div>
+
+            ${!linked && info.botUsername ? `
+                <div class="tg-steps">
+                    <div class="tg-step"><span>1</span>
+                        <a class="btn btn-primary grow" href="${esc(info.botLink)}" target="_blank" rel="noopener">
+                            <i data-lucide="external-link"></i> @${esc(info.botUsername)} ni ochish
+                        </a></div>
+                    <div class="tg-step"><span>2</span>
+                        <div class="grow">
+                            <code class="tg-code">/start ${esc(info.code)}</code>
+                            <div class="form-hint">Botga yuboring \u2014 u sizni avtomatik bog\u2018laydi.</div>
+                        </div>
+                        <button class="btn btn-soft" onclick="window.__copyTgCode()"><i data-lucide="copy"></i></button>
+                    </div>
+                </div>` : ''}
+
+            <details class="tg-manual">
+                <summary class="t-xs c-muted"><i data-lucide="chevron-down"></i> Chat ID\u2018ni qo\u2018lda kiritish</summary>
+                <div class="d-flex gap-2 mt-2">
+                    <input class="input grow" id="tg-chat" inputmode="numeric" placeholder="Telegram chat ID">
+                    <button class="btn btn-soft" onclick="window.__bindTelegram()"><i data-lucide="link"></i></button>
+                </div>
+            </details>
+
+            ${linked ? '<button class="btn btn-ghost btn-sm" onclick="window.__unbindTelegram()"><i data-lucide="unlink"></i> Uzib qo\u2018yish</button>' : ''}
+        </div>`, { icon: '<i data-lucide="send"></i>' });
+}
+
+window.__loadTgInfo = async () => {
+    try { _tgInfo = await api_get('/telegram/link-info'); } catch (e) { _tgInfo = { linked: false }; }
+};
+
+window.__copyTgCode = async () => {
+    const code = _tgInfo?.code || '';
+    if (!code) return;
+    try {
+        await navigator.clipboard.writeText('/start ' + code);
+        showToast('Kod nusxalandi', 'success');
+    } catch (e) { showToast('Nusxalashda xato: ' + e.message, 'error'); }
+};
+
 window.__bindTelegram = async () => {
     const val = document.getElementById('tg-chat')?.value.trim();
     if (!val) { showToast('Chat ID kiriting', 'error'); return; }
-    try { await api_post('/telegram/bind', { chatId: val }); showToast('Telegram bog‘landi', 'success'); renderView('profile'); }
+    try { await api_post('/telegram/bind', { chatId: val }); showToast('Telegram bog\u2018landi', 'success'); renderView('profile'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__unbindTelegram = async () => {
+    try { await api_post('/telegram/unbind', {}); showToast('Telegram uzildi', 'success'); renderView('profile'); }
     catch (e) { showToast(e.message, 'error'); }
 };
 
@@ -4282,7 +4473,7 @@ async function v_settings() {
                         <label class="label">Ruxsat etilgan radius (metr)</label>
                         <input class="input" id="set-radius" type="number" value="${num(s.attendanceRadius) || 200}">
                     </div>
-                    <button class="btn btn-outline" onclick="window.__saveGeo()">
+                    <button class="btn btn-save" onclick="window.__saveGeo()">
                         <i data-lucide="map-pin"></i> Geolokatsiyani saqlash
                     </button>
                 </div>`, { icon: '<i data-lucide="map-pin"></i>' })}
@@ -4294,7 +4485,17 @@ async function v_settings() {
                         <input class="input" id="set-token" value="${esc(s.telegramBotToken || '')}" placeholder="123456:ABC-DEF…">
                         <div class="form-hint mt-1">Token faqat adminlar uchun ko‘rinadi.</div>
                     </div>
-                </div>`, { icon: '<i data-lucide="send"></i>' }) : ''}
+                    <div class="field">
+                        <label class="label">Bot username</label>
+                        <input class="input" id="set-tg-user" value="${esc(s.telegramBotUsername || '')}" placeholder="OquvUzBot">
+                        <div class="form-hint mt-1">@BotFather bergan nom. Foydalanuvchilar shu havolani ochadi.</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary" onclick="window.__saveToken()"><i data-lucide="save"></i> Saqlash</button>
+                        <button class="btn btn-soft" onclick="window.__testToken()"><i data-lucide="plug-zap"></i> Tekshirish</button>
+                    </div>
+                    <div class="t-xs c-muted" id="tg-test-out"></div>
+                </div>`, { icon: '<i data-lucide="send"></i>', sub: 'Bot token @BotFather dan olinadi' }) : ''}
         </div>`;
 }
 
@@ -4325,10 +4526,60 @@ window.__saveGeo = async () => {
 
 window.__saveToken = async () => {
     try {
-        await api_patch('/settings', { telegramBotToken: document.getElementById('set-token').value });
-        showToast('Token saqlandi', 'success');
+        await api_patch('/settings', {
+            telegramBotToken: document.getElementById('set-token').value,
+            telegramBotUsername: document.getElementById('set-tg-user')?.value || '',
+        });
+        showToast('Telegram sozlamalari saqlandi', 'success');
     } catch (e) { showToast(e.message, 'error'); }
 };
+
+window.__testToken = async () => {
+    const out = document.getElementById('tg-test-out');
+    if (out) out.innerHTML = '<span class="spinner" style="width:13px;height:13px"></span> Tekshirilmoqda…';
+    try {
+        await api_patch('/settings', {
+            telegramBotToken: document.getElementById('set-token').value,
+            telegramBotUsername: document.getElementById('set-tg-user')?.value || '',
+        });
+        const res = await api_post('/telegram/test', { chatId: document.getElementById('tg-test-chat')?.value || '' });
+        if (out) out.innerHTML = `<span style="color:var(--green-600)">✓ ${esc(res.message)}</span>`;
+        showToast(res.message, 'success');
+    } catch (e) {
+        if (out) out.innerHTML = `<span style="color:var(--red-600)">✗ ${esc(e.message)}</span>`;
+        showToast(e.message, 'error');
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Mobil: yuqoriga qaytish tugmasi
+//  Telefonda quyi manyu baland bo'lgani uchun bosh sahifa qaytish
+//  qiyin edi. Tugma faqat 400 px dan yuqoriga scroll qilganda paydo bo'ladi.
+// ══════════════════════════════════════════════════════════════════════
+function initScrollTop() {
+    if (document.getElementById('scroll-top-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'scroll-top-btn';
+    btn.className = 'scroll-top-btn';
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Yuqoriga');
+    btn.innerHTML = '<i data-lucide="arrow-up"></i>';
+    btn.onclick = () => {
+        const body = document.querySelector('.app-body') || window;
+        if (body === window) window.scrollTo({ top: 0, behavior: 'smooth' });
+        else body.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    document.body.appendChild(btn);
+    safeLucide(btn);
+
+    const target = document.querySelector('.app-body') || window;
+    const onScroll = () => {
+        const y = target === window ? window.scrollY : target.scrollTop;
+        btn.classList.toggle('on', y > 420);
+    };
+    target.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+}
 
 // ══════════════════════════════════════════════════════════════════════
 //  Route table
@@ -4586,6 +4837,7 @@ async function boot() {
 document.addEventListener('DOMContentLoaded', () => {
     const iv = setInterval(() => { if (window.lucide) { clearInterval(iv); safeLucide(document); } }, 50);
     setTimeout(() => { clearInterval(iv); safeLucide(document); }, 1200);
+    initScrollTop();
 });
 
 boot();

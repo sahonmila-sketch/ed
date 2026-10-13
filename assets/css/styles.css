@@ -1079,7 +1079,7 @@ body.modal-open { overflow: hidden; }
 .splash-blob-2 { width: 320px; height: 320px; background: rgba(249, 115, 22, .22); bottom: -8%; right: -8%; animation-delay: -3s; }
 .splash-blob-3 { width: 220px; height: 220px; background: rgba(96, 165, 250, .22); top: 45%; left: 55%; animation-delay: -6s; }
 @keyframes blobFloat { from { transform: translate(0, 0) scale(1); } to { transform: translate(38px, -28px) scale(1.18); } }
-.splash-inner { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; }
+.splash-inner { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; max-width: 100%; }
 .splash-mark {
     position: relative;
     display: flex; align-items: center; justify-content: center;
@@ -1097,10 +1097,161 @@ body.modal-open { overflow: hidden; }
 }
 @keyframes markIn { from { opacity: 0; transform: scale(.5) rotate(-14deg); } to { opacity: 1; transform: none; } }
 .splash-title { font-size: 2rem; font-weight: 900; letter-spacing: -.03em; margin-top: 22px; animation: fadeUp .7s .15s var(--ease) both; }
+
+/* Yuklash ekranidagi "yuguruvchi" nom — ikki panelga bo'lingan holda
+   sahna yorug'i bilan aylanadi, matn esa panellar bo'ylab uzluksiz
+   siljiydi. Ranglar sayt palitrasidan (to'q ko'k + moviy + apelsin). */
+.splash-marquee {
+    display: flex;
+    flex: none;
+    margin-top: 26px;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 26px 60px -26px rgba(0, 0, 0, .75);
+    animation: markIn .8s .12s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+.splash-half {
+    position: relative;
+    flex: none;
+    width: min(45vw, 250px);
+    min-width: min(45vw, 250px);
+    height: 66px;
+    line-height: 66px;
+    font-size: clamp(1.05rem, 4.6vw, 1.4rem);
+    font-weight: 900;
+    letter-spacing: .075em;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.splash-half:first-child {
+    background: linear-gradient(135deg, #0b1a3d, #16307a 62%, #1d4ed8);
+    color: #fb923c;
+    transform-origin: right center;
+    transform: perspective(150px) rotateY(-15deg);
+}
+.splash-half:last-child {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8 55%, #1e40af);
+    color: #fff;
+    transform-origin: left center;
+    transform: perspective(150px) rotateY(15deg);
+}
+.splash-half span {
+    position: absolute;
+    left: 100%;
+    animation: splashMarquee 6.5s linear infinite;
+}
+.splash-half:first-child span { animation-delay: 3.25s; }
+
+@keyframes splashMarquee {
+    from { left: 100%; }
+    to   { left: -100%; }
+}
+
+/* Member/telefon uchun: panellar bir-birining ustiga tushmasin */
+@media (max-width: 700px) {
+    .splash-marquee { transform: scale(.82); transform-origin: center; }
+}
+@media (max-width: 420px) {
+    .splash-marquee { border-radius: 13px; transform: scale(.7); }
+    .splash-half { height: 58px; line-height: 58px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .splash-half span { animation: none; left: 0; }
+}
 .splash-tag   { font-size: .6875rem; font-weight: 700; letter-spacing: .22em; text-transform: uppercase; color: #93c5fd; margin-top: 6px; animation: fadeUp .7s .3s var(--ease) both; }
 .splash-bar { width: 150px; height: 4px; margin-top: 28px; border-radius: 999px; background: rgba(255, 255, 255, .16); overflow: hidden; animation: fadeUp .7s .45s var(--ease) both; }
 .splash-bar i { display: block; width: 40%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #93c5fd, #fb923c); animation: barSlide 1.2s infinite var(--ease); }
 @keyframes barSlide { from { transform: translateX(-110%); } to { transform: translateX(360%); } }
+
+/* ── Saqlash tugmalari: Uiverse uslubidagi siljuvchi to'ldirish ────────
+   Ikonka chap tomonda rangli blok bo'lib turadi; kursorni olib kelganda
+   rang chapdan o'ngga to'ldiriladi va matn oq rangga o'tadi.
+   `.btn-save` klassi bilan qo'lda ham qo'llash mumkin, shuningdek
+   ichida `save` ikonkasi bo'lgan har qanday `.btn` avtomatik shu
+   uslubga o'tadi — shu sababli o'nlab shablonni qayta yozish shart emas.
+   -------------------------------------------------------------------- */
+.btn-save,
+.btn:has(> [data-lucide="save"]) {
+    --save-clr: var(--primary, #2563eb);
+    --btn-bg: #fff;
+    --btn-fg: #121212;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    gap: 0;
+    padding: 3px 20px 3px 3px;
+    border-radius: 1.5rem;
+    border: 1px solid var(--border);
+    color: #121212;
+    box-shadow: 0 10px 24px -14px rgba(15, 23, 42, .35);
+    transition: color .25s var(--ease), border-color .25s var(--ease),
+                box-shadow .25s var(--ease);
+}
+.btn-save::before,
+.btn:has(> [data-lucide="save"])::before {
+    /* siljuvchi to'ldirish */
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--save-clr);
+    transform: translateX(-100%);
+    transition: transform .32s var(--ease);
+}
+.btn-save > svg,
+.btn:has(> [data-lucide="save"]) > svg {
+    width: 36px;
+    height: 42px;
+    flex: none;
+    margin-right: 12px;
+    padding: 11px;
+    box-sizing: border-box;
+    border-radius: 1.35rem 0 0 1.35rem;
+    background: var(--save-clr);
+    color: #fff;
+    transition: background .25s var(--ease);
+}
+.btn-save:hover, .btn-save:focus-visible,
+.btn:has(> [data-lucide="save"]):hover,
+.btn:has(> [data-lucide="save"]):focus-visible {
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 14px 30px -14px rgba(37, 99, 235, .55);
+}
+.btn-save:hover::before, .btn-save:focus-visible::before,
+.btn:has(> [data-lucide="save"]):hover::before,
+.btn:has(> [data-lucide="save"]):focus-visible::before {
+    transform: translateX(0);
+}
+/* To'ldirish ostidagi ikonka bloki yo'qolib ketmasin */
+.btn-save:hover > svg, .btn:has(> [data-lucide="save"]):hover > svg {
+    background: rgba(255, 255, 255, .18);
+}
+/* Bosilganda kichrayish (mobil qatlam bilan uyg'un) */
+.btn-save:active, .btn:has(> [data-lucide="save"]):active { transform: scale(.975); }
+/* O'chirilgan / yuklanayotgan holatda animatsiya bo'lmasin */
+.btn-save[disabled]::before, .btn:has(> [data-lucide="save"])[disabled]::before { transform: translateX(-100%); }
+
+/* Boshqa (apelsin) rangda kerak bo'lsa: class="btn-save" style="--save-clr:#ea580c" */
+.btn-save.accent, .btn-accent:has(> [data-lucide="save"]) { --save-clr: var(--accent, #f97316); }
+
+@media (hover: none) {
+    /* Sensorli ekranda hover yo'q — doimiy rangli ko'rinish beramiz */
+    .btn-save::before,
+    .btn:has(> [data-lucide="save"])::before { transform: translateX(0); }
+    .btn-save, .btn:has(> [data-lucide="save"]) { color: #fff; border-color: transparent; }
+}
+
+@media (max-width: 767px) {
+    .btn-save, .btn:has(> [data-lucide="save"]) { padding: 3px 16px 3px 3px; min-height: 0; }
+    .btn-save > svg, .btn:has(> [data-lucide="save"]) > svg { width: 34px; height: 40px; padding: 10px; }
+}
+
+/* .sr-only — faqat ekran o'quvchilar uchun */
+.sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 /* ── 19. Onboarding ────────────────────────────────────────────────────── */
 .intro-root {
@@ -1771,6 +1922,92 @@ body.modal-open { overflow: hidden; }
 .checkin-card .btn-primary:hover { background: #fff; filter: brightness(.96); }
 .checkin-card.done .badge-green { background: rgba(255, 255, 255, .2); color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); }
 
+/* Geolokatsiya o'lchagichi ------------------------------------------------ */
+.geo-readout {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    margin-top: 14px; padding: 13px 15px; border-radius: 18px;
+    background: rgba(255, 255, 255, .12);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18);
+}
+.geo-readout[hidden] { display: none; }
+.geo-ring {
+    --p: 0;
+    position: relative; flex: none; width: 62px; height: 62px; border-radius: 50%;
+    display: grid; place-items: center; line-height: 1.05;
+    background:
+        conic-gradient(#fbbf24 calc(var(--p) * 1%), rgba(255, 255, 255, .18) 0);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2);
+}
+.geo-ring::before {
+    content: ''; position: absolute; inset: 6px; border-radius: 50%;
+    background: rgba(11, 34, 78, .82);
+}
+.geo-ring > span, .geo-ring > small { position: relative; z-index: 1; }
+.geo-ring > span { font-size: 15px; font-weight: 800; color: #fff; }
+.geo-ring > small { font-size: 8px; letter-spacing: .04em; text-transform: uppercase; color: rgba(255, 255, 255, .66); margin-top: -14px; }
+.geo-ring.over { background: conic-gradient(#fb7185 calc(var(--p) * 1%), rgba(255, 255, 255, .18) 0); }
+.geo-line {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12.5px; font-weight: 600; color: #fff; margin-top: 3px;
+}
+.geo-line:first-child { margin-top: 0; }
+.geo-line svg { width: 14px; height: 14px; flex: none; opacity: .85; }
+.geo-line .c-muted { color: rgba(255, 255, 255, .74); font-weight: 500; }
+.checkin-card .btn-soft {
+    background: rgba(255, 255, 255, .16); color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .28);
+}
+.checkin-card .btn-soft:hover { background: rgba(255, 255, 255, .26); }
+.checkin-card .btn-ghost { color: rgba(255, 255, 255, .9); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
+.checkin-card .btn-ghost:hover { background: rgba(255, 255, 255, .14); }
+.checkin-card .spinner { border-top-color: #fff; }
+#checkin-hint:empty { display: none; }
+
+/* Telegram bog'lash qadamlari --------------------------------------------- */
+.tg-steps { display: grid; gap: 9px; }
+.tg-step {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 14px;
+    background: var(--blue-50, #eff6ff);
+    box-shadow: inset 0 0 0 1px var(--blue-100, #dbeafe);
+}
+.tg-step > span {
+    flex: none; width: 22px; height: 22px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--blue-600, #2563eb); color: #fff;
+    font-size: 11px; font-weight: 800;
+}
+.tg-code {
+    display: inline-block; padding: 4px 9px; border-radius: 8px;
+    background: #fff; box-shadow: inset 0 0 0 1px var(--blue-200, #bfdbfe);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px; font-weight: 700; color: var(--blue-800, #1e40af);
+}
+.tg-manual { border-top: 1px dashed var(--blue-200, #bfdbfe); padding-top: 10px; }
+.tg-manual summary {
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    list-style: none; user-select: none;
+}
+.tg-manual summary::-webkit-details-marker { display: none; }
+.tg-manual summary svg { width: 14px; height: 14px; transition: transform .18s ease; }
+.tg-manual[open] summary svg { transform: rotate(180deg); }
+
+/* Telefon uchun -------------------------------------------------------------- */
+@media (max-width: 480px) {
+    .checkin-card { padding: 16px 15px; gap: 13px; border-radius: 20px; align-items: flex-start; }
+    .checkin-icon { width: 44px; height: 44px; border-radius: 14px; }
+    .checkin-icon svg { width: 21px; height: 21px; }
+    .geo-readout { padding: 11px 12px; gap: 11px; margin-top: 12px; }
+    .geo-ring { width: 54px; height: 54px; }
+    .geo-ring > span { font-size: 13px; }
+    .checkin-card .d-flex.gap-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .checkin-card .d-flex.gap-2 .btn-primary { grid-column: 1 / -1; }
+    .checkin-card .btn { width: 100%; justify-content: center; }
+    .tg-step { flex-wrap: wrap; }
+    .tg-step .btn { width: 100%; justify-content: center; }
+    .tg-code { font-size: 12px; }
+}
+
 /* Kutubxona muqovasi */
 .book-cover {
     position: relative; height: 152px; border-radius: var(--r-lg); overflow: hidden;
@@ -1967,3 +2204,120 @@ body.modal-open { overflow: hidden; }
 .gate-inline > svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
 .gate-inline b { display: block; font-size: .875rem; font-weight: 900; }
 .gate-inline span { display: block; margin-top: 2px; line-height: 1.45; opacity: .92; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   36. MOBIL QATLAM
+   Telefonda "ishlaydi" emas, qulay bo'lishi kerak: barmoq nishoni kamida
+   44px, bosilish sezilsin, xatolar barmoqq yaqin chiqsin, iOS esa
+   inputga bosilganda kattalashib ketmasin.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* 1. Sahifa silishi: pastga tortilishda brauzer "refresh" qilmasin */
+html { overscroll-behavior-y: none; }
+body {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+}
+.app-body { -webkit-overflow-scrolling: touch; }
+
+/* 2. Bosilish hissi — faqat qurilmada (hover: hover) emas, har doim */
+@media (hover: none) {
+    .btn, .chip, .badge-btn, .list-row.click, .card.click,
+    .app-topbar a, .app-sidebar a, .app-bottomnav a,
+    .shop-card, .book-card, .game-card, .tabs button {
+        transition: transform .12s var(--ease-out), filter .12s var(--ease-out);
+    }
+    .btn:active, .chip:active, .badge-btn:active,
+    .list-row.click:active, .card.click:active,
+    .app-topbar a:active, .app-sidebar a:active,
+    .shop-card:active, .book-card:active, .game-card:active {
+        transform: scale(.97);
+        filter: brightness(.97);
+    }
+    /* Yuklanayotgan tugmalar qisqarib qolmasin */
+    .btn[disabled], .btn.loading { transform: none; }
+}
+
+/* 3. Filtr/tab qatori: gorizontal silintirish, snap bilan */
+.scroll-x {
+    display: flex; gap: 8px; align-items: center;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    margin: 0 -4px; padding-inline: 4px;
+}
+.scroll-x::-webkit-scrollbar { display: none; }
+.scroll-x > * { scroll-snap-align: start; flex: none; }
+
+/* 4. Yuqoriga qaytish tugmasi (faqat mobil) */
+.scroll-top-btn {
+    position: fixed; z-index: 65;
+    right: 14px;
+    bottom: calc(var(--bottomnav-h) + 16px + env(safe-area-inset-bottom));
+    width: 44px; height: 44px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--surface); color: var(--primary);
+    border: 1px solid var(--border);
+    box-shadow: 0 12px 28px -12px rgba(15, 23, 42, .38);
+    opacity: 0; visibility: hidden; transform: translateY(12px) scale(.9);
+    transition: opacity var(--t) var(--ease), transform var(--t) var(--ease-out), visibility var(--t);
+}
+.scroll-top-btn.on { opacity: 1; visibility: visible; transform: none; }
+.scroll-top-btn:active { transform: scale(.9); }
+.scroll-top-btn svg { width: 20px; height: 20px; }
+@media (min-width: 900px) { .scroll-top-btn { display: none; } }
+
+/* 5. Telefonda maxsus qoidalar */
+@media (max-width: 767px) {
+    /* iOS inputga bosilganda sahifa kattalashmasin (font 16px+ shart) */
+    .input, .select, .textarea, .modal input, .modal select {
+        font-size: 16px; padding: 13px 14px;
+    }
+    /* Barmoq nishoni */
+    .btn { min-height: 44px; padding: 12px 18px; }
+    .btn-sm { min-height: 38px; padding: 8px 14px; }
+    .icon-btn { width: 44px; height: 44px; }
+    .chip { padding: 7px 13px; }
+    /* Xato va muvaffaqiyat xabarlari barmoqq yaqinroq bo'lsin:
+       tepadagi panel ularni yopib qo'yardi. */
+    .toast-stack {
+        top: auto;
+        bottom: calc(var(--bottomnav-h) + 12px + env(safe-area-inset-bottom));
+        animation: none;
+    }
+    .toast { animation: toastUp .28s var(--ease-out); }
+    /* Sahifa sarlavhasi kichik ekranda yiqilmasin */
+    .page-head { margin-bottom: 14px; gap: 10px; }
+    .page-title { font-size: 1.3rem; }
+    .page-sub { font-size: .8125rem; }
+    /* Guruh kartalari va ro'yxatlar to'liq kenglikda */
+    .stat-grid { gap: 10px; }
+    .card-pad { padding: 15px 14px; }
+    .modal-card { max-height: 94dvh; }
+}
+
+@media (max-width: 400px) {
+    .btn { padding: 12px 14px; font-size: .8125rem; }
+    .page-title { font-size: 1.2rem; }
+}
+
+/* 6. Qorong\u2018i rejim va kontrast kuchaytirilgan variant */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        transition-duration: .001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* 7. Hero balandligi: kichik telefonlarda qisqartiramiz, shunda
+      birinchi ekranda asosiy kontent ko\u2018rinadi. */
+@media (max-width: 480px) {
+    .hero-panel { padding: 18px 16px; border-radius: var(--r-xl); }
+    .hero-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .hero-stat { padding: 9px 8px; }
+    .hero-stat b { font-size: 1.05rem; }
+}
+
+@keyframes toastUp { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }

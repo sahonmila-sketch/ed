@@ -7,7 +7,7 @@
     <meta name="description" content="O’quv.uz — zamonaviy ta’lim platformasi. Kurslar, darslar, baholar, davomat va reyting.">
     <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="assets/img/icon-180.png">
-    <link rel="stylesheet" href="assets/css/styles.css?v=43">
+    <link rel="stylesheet" href="assets/css/styles.css?v=48">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2563eb">
     <meta name="mobile-web-app-capable" content="yes">
@@ -24,7 +24,13 @@
         <div class="splash-blob splash-blob-3"></div>
         <div class="splash-inner">
             <div class="splash-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
-            <h1 class="splash-title">O’quv<span style="color:#93c5fd">.uz</span></h1>
+            <h1 class="sr-only">O’quv.uz</h1>
+
+            <div class="splash-marquee" aria-hidden="true">
+                <div class="splash-half"><span>O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;</span></div>
+                <div class="splash-half"><span>O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;</span></div>
+            </div>
+
             <p class="splash-tag">Zamonaviy ta’lim platformasi</p>
             <div class="splash-bar"><i></i></div>
         </div>
@@ -274,11 +280,11 @@
         <div id="modal-content-area" style="position:relative;z-index:1;width:100%;max-width:560px;display:flex;justify-content:center"></div>
     </div>
 
-    <script type="module" src="assets/js/app.js?v=43"></script>
+    <script type="module" src="assets/js/app.js?v=48"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js?v=43').catch(() => {});
+                navigator.serviceWorker.register('/sw.js?v=48').catch(() => {});
             });
         }
     </script>
