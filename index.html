@@ -1,225 +1,290 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="uz">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>O'quv.uz | LMS SaaS Platforma</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Custom Styles -->
-    <link rel="stylesheet" href="assets/css/styles.css?v=9">
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- PWA Manifest -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>O’quv.uz — Ta’lim platformasi</title>
+    <meta name="description" content="O’quv.uz — zamonaviy ta’lim platformasi. Kurslar, darslar, baholar, davomat va reyting.">
+    <link rel="icon" href="assets/img/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="assets/img/icon-180.png">
+    <link rel="stylesheet" href="assets/css/styles.css?v=48">
     <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <script src="https://unpkg.com/lucide@latest" defer></script>
 </head>
+<body>
 
-<body class="text-slate-800 min-h-screen">
+    <!-- ══ SPLASH ══ -->
+    <div id="splash-screen" class="splash">
+        <div class="splash-blob splash-blob-1"></div>
+        <div class="splash-blob splash-blob-2"></div>
+        <div class="splash-blob splash-blob-3"></div>
+        <div class="splash-inner">
+            <div class="splash-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
+            <h1 class="sr-only">O’quv.uz</h1>
 
-    <!-- FIRST VISIT INTRO (ONBOARDING) -->
-    <div id="intro-modal"
-        class="fixed inset-0 z-[200] bg-white/95 backdrop-blur-md flex flex-col items-center justify-center transition-all duration-700 hidden">
-        <button id="btn-skip-intro"
-            class="absolute top-6 right-6 text-slate-400 hover:text-slate-600 font-bold text-xs md:text-sm transition-all flex items-center gap-1 active:scale-95 bg-slate-100 px-4 py-2 rounded-full hover:bg-slate-200">O'tkazib yuborish <i data-lucide="chevrons-right" class="w-4 h-4"></i></button>
-
-        <div class="relative w-full max-w-sm md:max-w-2xl text-center mx-auto px-6">
-            <!-- Slide 1 -->
-            <div class="intro-slide flex-col items-center active" data-slide="1">
-                <div class="w-24 h-24 md:w-32 md:h-32 bg-[#f0f4ff] rounded-full flex items-center justify-center mb-8 mx-auto transition-transform animate-zoom shadow-xl shadow-indigo-100/50">
-                    <i data-lucide="book-open" class="w-10 h-10 md:w-16 md:h-16 text-indigo-600"></i>
-                </div>
-                <h2 class="text-3xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight leading-tight">LMS Platformasiga<br><span class="text-indigo-600">Xush Kelibsiz</span></h2>
-                <p class="text-slate-500 font-medium text-sm md:text-lg px-4 leading-relaxed max-w-xl mx-auto">Bu platforma orqali siz darslarni o'rganishingiz mumkin. Zamonaviy kasblar va bilimlar dunyosiga qadam qo'ying.</p>
+            <div class="splash-marquee" aria-hidden="true">
+                <div class="splash-half"><span>O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;</span></div>
+                <div class="splash-half"><span>O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;O’QUV.UZ&nbsp;&nbsp;•&nbsp;&nbsp;ZAMONAVIY TA’LIM&nbsp;&nbsp;•&nbsp;&nbsp;</span></div>
             </div>
 
-            <!-- Slide 2 -->
-            <div class="intro-slide flex-col items-center" data-slide="2">
-                <div class="w-24 h-24 md:w-32 md:h-32 bg-[#fff1f9] rounded-full flex items-center justify-center mb-8 mx-auto transition-transform animate-zoom shadow-xl shadow-purple-100/50">
-                    <i data-lucide="zap" class="w-10 h-10 md:w-16 md:h-16 text-purple-600"></i>
-                </div>
-                <h2 class="text-3xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight leading-tight">Gamifikatsiya va<br><span class="text-purple-600">Progress</span></h2>
-                <p class="text-slate-500 font-medium text-sm md:text-lg px-4 leading-relaxed max-w-xl mx-auto">Ballar to'plang, yutuqlarni oching va reytingda yuqoriga ko'tariling. O'rganish endi maroqli va qiziqarli!</p>
-            </div>
-
-            <!-- Slide 3 -->
-            <div class="intro-slide flex-col items-center" data-slide="3">
-                <div class="w-24 h-24 md:w-32 md:h-32 bg-[#f0fdf4] rounded-full flex items-center justify-center mb-8 mx-auto transition-transform animate-zoom shadow-xl shadow-emerald-100/50">
-                    <i data-lucide="award" class="w-10 h-10 md:w-16 md:h-16 text-emerald-600"></i>
-                </div>
-                <h2 class="text-3xl md:text-5xl font-black text-slate-900 mb-4 tracking-tight leading-tight">Karyerangizni<br><span class="text-emerald-600">Boshlang</span></h2>
-                <p class="text-slate-500 font-medium text-sm md:text-lg px-4 leading-relaxed max-w-xl mx-auto">Darslarni tugatib, o'z bilimingizni tasdiqlang. Biz sizning muvaffaqiyatingizga har doim ishonamiz!</p>
-            </div>
-
-            <!-- Controls -->
-            <div class="flex flex-col md:flex-row items-center justify-between mt-12 w-full max-w-lg mx-auto gap-6 md:gap-0">
-                <div class="flex gap-2 items-center" id="intro-dots">
-                    <div class="slide-dot active w-3 h-3 rounded-full bg-indigo-600"></div>
-                    <div class="slide-dot w-3 h-3 rounded-full bg-slate-200"></div>
-                    <div class="slide-dot w-3 h-3 rounded-full bg-slate-200"></div>
-                </div>
-                <button id="btn-next-intro"
-                    class="w-full md:w-auto bg-indigo-600 hover:bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-sm md:text-base shadow-xl shadow-indigo-600/30 btn-interactive transition-all flex items-center justify-center gap-2 group">
-                    Keyingisi <i data-lucide="arrow-right" class="w-5 h-5 group-hover:translate-x-1 transition-transform"></i>
-                </button>
-            </div>
+            <p class="splash-tag">Zamonaviy ta’lim platformasi</p>
+            <div class="splash-bar"><i></i></div>
         </div>
     </div>
 
-    <!-- Mobile Header -->
-    <header class="lg:hidden fixed top-0 w-full glass px-6 py-4 flex justify-between items-center z-[60] shadow-sm">
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-md">
-                <i data-lucide="graduation-cap" class="text-white w-5 h-5"></i>
-            </div>
-            <span class="font-extrabold text-xl tracking-tight text-slate-800">O'quv.uz</span>
-        </div>
-        <button id="mobile-menu-btn"
-            class="p-2 bg-white border border-slate-200 shadow-sm rounded-xl text-slate-600 hover:text-indigo-600 transition-all active:scale-95">
-            <i data-lucide="menu" class="w-6 h-6"></i>
+    <!-- ══ SIDEBAR OVERLAY ══ -->
+    <div id="sidebar-overlay" class="sb-overlay" onclick="toggleSidebar()"></div>
+
+    <!-- ══ ONBOARDING ══ -->
+    <div id="intro-modal" class="intro-root hidden">
+        <button id="btn-skip-intro" class="btn btn-ghost btn-sm" style="position:absolute;top:16px;right:16px">
+            O’tkazib yuborish <i data-lucide="chevrons-right"></i>
         </button>
-    </header>
 
-    <!-- Sidebar Wrapper -->
-    <aside id="sidebar-container"
-        class="fixed top-0 left-0 w-72 h-screen glass border-r border-slate-200/60 p-6 flex flex-col z-[50] transition-transform duration-300 transform -translate-x-full lg:translate-x-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-        <div class="flex flex-row items-center gap-3 mb-10 pl-2 mt-4 lg:mt-0">
-            <div
-                class="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30">
-                <i data-lucide="graduation-cap" class="text-white w-6 h-6"></i>
-            </div>
-            <span class="text-2xl font-black text-slate-800">O'quv.uz</span>
+        <div class="intro-slide active" data-slide="1">
+            <div class="intro-art"><i data-lucide="book-open"></i></div>
+            <h2 class="intro-title">Platformaga<br><span class="c-primary">xush kelibsiz</span></h2>
+            <p class="intro-text">Kurslar, darslar, baholar va davomat — hammasi bitta joyda. O’rganishni boshlash uchun tayyormisiz?</p>
         </div>
 
-        <nav class="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-1.5" id="nav-menu">
-            <!-- Dynamic Links injected via JS -->
-        </nav>
+        <div class="intro-slide" data-slide="2">
+            <div class="intro-art accent"><i data-lucide="zap"></i></div>
+            <h2 class="intro-title">Ball to’plang,<br><span class="c-accent">yuqoriga ko’taring</span></h2>
+            <p class="intro-text">Darslarni tugatib XP yig’ing, yutuqlarni oching va reytingda eng yaxshilar qatoriga chiqing.</p>
+        </div>
 
-        <div class="mt-4 pt-5 border-t border-slate-200 px-2 flex items-center gap-3 group cursor-pointer"
-            onclick="window.location.hash='profile'">
-            <div id="sidebar-avatar"
-                class="w-11 h-11 rounded-[14px] bg-slate-100 flex items-center justify-center font-black text-indigo-600 shadow-sm border border-slate-200 group-hover:bg-indigo-50 transition-colors">
-                U</div>
-            <div class="flex-1 overflow-hidden">
-                <p id="sidebar-name" class="text-sm font-bold text-slate-800 truncate w-full">Foydalanuvchi</p>
-                <p id="sidebar-role" class="text-[10px] uppercase font-black tracking-widest text-indigo-500 mt-0.5">
-                    Role</p>
+        <div class="intro-slide" data-slide="3">
+            <div class="intro-art green"><i data-lucide="award"></i></div>
+            <h2 class="intro-title">Natijangizni<br><span class="c-green">kuzating</span></h2>
+            <p class="intro-text">Har bir dars, har bir baho va har bir kelgan kun — o’sishni ko’rsatadi. Boshlaymiz!</p>
+        </div>
+
+        <div class="d-flex items-center justify-between gap-4 w-full mt-8" style="max-width:420px">
+            <div class="dots" id="intro-dots">
+                <i class="slide-dot active"></i>
+                <i class="slide-dot"></i>
+                <i class="slide-dot"></i>
             </div>
+            <button id="btn-next-intro" class="btn btn-primary">
+                Keyingisi <i data-lucide="arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- ══ SIDEBAR ══ -->
+    <aside id="sidebar-container" class="app-sidebar">
+        <div class="sb-head">
+            <div class="brand">
+                <div class="brand-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
+                <div style="min-width:0">
+                    <div class="brand-name truncate">O’quv.uz</div>
+                    <div class="brand-sub">LMS Platform</div>
+                </div>
+            </div>
+            <button id="sidebar-close" class="sb-close" aria-label="Yopish">
+                <i data-lucide="x"></i>
+            </button>
+        </div>
+
+        <nav class="sb-nav" id="nav-menu"></nav>
+
+        <div class="sb-foot">
+            <button class="sb-user" onclick="go('profile')">
+                <div id="sidebar-avatar" class="avatar avatar-sm">?</div>
+                <div class="grow" style="min-width:0">
+                    <div id="sidebar-name" class="sb-user-name truncate">Foydalanuvchi</div>
+                    <div id="sidebar-role" class="sb-user-role">rol</div>
+                </div>
+                <i data-lucide="chevron-right" style="width:16px;height:16px;color:var(--gray-400)"></i>
+            </button>
         </div>
     </aside>
 
-    <!-- Main Content -->
-    <main id="main-content" class="min-h-screen transition-all duration-300 w-full lg:w-auto relative">
-        <!-- Toast Notifications -->
-        <div id="toast-container" class="fixed top-4 right-4 z-[100] space-y-3 flex flex-col items-end"></div>
+    <!-- ══ MAIN ══ -->
+    <div id="main-content" class="app-main">
+        <!-- Toasts -->
+        <div id="toast-container" class="toast-stack"></div>
 
-        <!-- HOME: LANDING PAGE -->
-        <section id="view-home" class="view-section min-h-screen overflow-y-auto hidden">
-            <div id="landing-content" class="w-full space-y-0">
-            </div>
-        </section>
-
-        <!-- AUTH: LOGIN -->
-        <section id="view-login" class="view-section flex items-center justify-center min-h-screen p-4">
-            <div class="glass-card w-full max-w-md p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem] relative">
-                <div class="text-center mb-6 md:mb-8">
-                    <div
-                        class="w-16 h-16 md:w-20 md:h-20 bg-indigo-600 rounded-2xl md:rounded-[1.5rem] flex items-center justify-center shadow-xl shadow-indigo-600/30 mx-auto mb-4 md:mb-6 transform rotate-3 scale-105">
-                        <i data-lucide="graduation-cap" class="text-white w-8 h-8 md:w-10 md:h-10"></i>
-                    </div>
-                    <h1 class="text-2xl md:text-3xl font-black text-slate-800 mb-1 md:mb-2 tracking-tight">Xush Kelibsiz</h1>
-                    <p class="text-slate-500 text-xs md:text-sm font-medium">Boshqaruv paneliga kirish</p>
+        <!-- Topbar (mobile) -->
+        <header id="mobile-header" class="app-topbar hidden">
+            <div class="brand">
+                <div class="brand-mark" style="width:36px;height:36px;border-radius:11px">
+                    <img src="assets/img/logo.png" alt="O’quv.uz">
                 </div>
-                <form id="form-login" class="space-y-3 md:space-y-4">
-                    <div id="login-error-card"
-                        class="hidden bg-red-50 border border-red-100 text-red-600 text-xs md:text-sm p-3 md:p-4 rounded-xl flex flex-col sm:flex-row sm:items-center gap-2 md:gap-3 shadow-sm">
-                        <i data-lucide="alert-circle" class="w-4 h-4 md:w-5 md:h-5 shrink-0"></i>
-                        <span class="font-bold">Email yoki parol xato!</span>
-                    </div>
-                    <div class="space-y-3 md:space-y-4">
-                        <div class="relative group">
-                            <i data-lucide="mail"
-                                class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-slate-400 group-focus-within:text-indigo-600 transition-colors"></i>
-                            <input type="email" id="log-email" required placeholder="Elektron pochtangiz"
-                                class="w-full bg-white border border-slate-200 rounded-xl md:rounded-2xl pl-10 md:pl-12 pr-4 py-3.5 md:py-4 text-sm md:text-base text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold placeholder-slate-400">
-                        </div>
-                        <div class="relative group">
-                            <i data-lucide="lock"
-                                class="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-slate-400 group-focus-within:text-indigo-600 transition-colors"></i>
-                            <input type="password" id="log-pass" required placeholder="Parol"
-                                class="w-full bg-white border border-slate-200 rounded-xl md:rounded-2xl pl-10 md:pl-12 pr-4 py-3.5 md:py-4 text-sm md:text-base text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold placeholder-slate-400">
-                        </div>
-                    </div>
-                    <button type="submit"
-                        class="btn-interactive w-full bg-indigo-600 hover:bg-indigo-700 py-3.5 md:py-4 rounded-xl md:rounded-2xl text-white font-black text-base md:text-lg shadow-xl shadow-indigo-600/30 mt-4">
-                        Tizimga Kirish
-                    </button>
-                    <p class="text-center text-xs md:text-sm text-slate-500 mt-4 md:mt-6 font-medium">
-                        Akkaunt yo'qmi? <span
-                            class="text-indigo-600 font-bold hover:text-indigo-700 cursor-pointer transition-colors"
-                            data-link="register">Yaratish</span>
-                    </p>
-                </form>
-            </div>
-        </section>
-
-        <!-- AUTH: REGISTER -->
-        <section id="view-register" class="view-section flex items-center justify-center min-h-screen p-4">
-            <div class="glass-card w-full max-w-md p-6 md:p-10 rounded-[2rem] md:rounded-[2.5rem]">
-                <div class="text-center mb-6 md:mb-8">
-                    <h1 class="text-2xl md:text-3xl font-black text-slate-800 mb-1 md:mb-2">Qo'shilish</h1>
-                    <p class="text-slate-500 text-xs md:text-sm font-medium">Platformani to'liq ishlating.</p>
+                <div style="min-width:0">
+                    <div class="brand-name" style="font-size:.9375rem">O’quv.uz</div>
                 </div>
-                <form id="form-register" class="space-y-3 md:space-y-4">
-                    <div id="reg-error-card"
-                        class="hidden bg-red-50 border border-red-100 text-red-600 text-xs md:text-sm p-3 md:p-4 rounded-xl flex items-center gap-2 md:gap-3">
-                        <i data-lucide="alert-octagon" class="w-4 h-4 md:w-5 md:h-5 shrink-0"></i>
-                        <span class="font-bold" id="reg-error-msg">Xatolik</span>
-                    </div>
-                    <div class="space-y-3 md:space-y-4">
-                        <input type="text" id="reg-name" required placeholder="To'liq lsm va Familiya"
-                            class="w-full bg-white border border-slate-200 rounded-xl md:rounded-2xl px-4 md:px-5 py-3.5 md:py-4 text-sm md:text-base text-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold placeholder-slate-400">
-                        <input type="email" id="reg-email" required placeholder="Email manzili"
-                            class="w-full bg-white border border-slate-200 rounded-xl md:rounded-2xl px-4 md:px-5 py-3.5 md:py-4 text-sm md:text-base text-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold placeholder-slate-400">
-                        <input type="password" id="reg-pass" required minlength="6" placeholder="Parol (kamida 6 belgi)"
-                            class="w-full bg-white border border-slate-200 rounded-xl md:rounded-2xl px-4 md:px-5 py-3.5 md:py-4 text-sm md:text-base text-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold placeholder-slate-400">
-                        <div id="reg-group-container" class="relative"></div>
-                    </div>
-                    <button type="submit"
-                        class="btn-interactive w-full bg-slate-900 hover:bg-slate-800 py-3.5 md:py-4 rounded-xl md:rounded-2xl text-white font-black text-base md:text-lg shadow-xl shadow-slate-900/20 mt-4 md:mt-6">
-                        Yaratish
-                    </button>
-                    <p class="text-center text-xs md:text-sm text-slate-500 mt-4 md:mt-6 font-medium">
-                        Akkaunt bormi? <span
-                            class="text-slate-800 font-bold underline cursor-pointer hover:text-indigo-600"
-                            data-link="login">Kirish</span>
-                    </p>
-                </form>
             </div>
-        </section>
+            <div class="d-flex items-center gap-2">
+                <button class="tb-user" onclick="go('profile')" aria-label="Profilim">
+                    <div id="topbar-avatar" class="avatar avatar-sm">?</div>
+                    <div style="min-width:0">
+                        <div id="topbar-name" class="tb-user-name truncate">Foydalanuvchi</div>
+                        <div id="topbar-role" class="tb-user-role truncate">rol</div>
+                    </div>
+                    <i data-lucide="chevron-down"></i>
+                </button>
+                <button id="mobile-notif-btn" data-notif-anchor class="btn-icon sm" aria-label="Bildirishnomalar">
+                    <i data-lucide="bell"></i>
+                </button>
+                <button id="mobile-menu-btn" class="btn-icon sm" aria-label="Menyu">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+        </header>
 
-        <!-- DASHBOARD CONTAINER (Layout padding for logged in views) -->
-        <div id="dashboard-wrapper"
-            class="hidden p-6 pt-24 lg:pt-8 lg:pl-10 lg:pr-10 max-w-[1600px] mx-auto min-h-screen">
-            <!-- Dynamic view injected here -->
-            <div id="dynamic-view-area"></div>
+        <div class="app-body">
+
+            <!-- Landing -->
+            <section id="view-home" class="view-section hidden" style="margin:-16px -14px 0">
+                <div id="landing-content"></div>
+            </section>
+
+            <!-- Login -->
+            <section id="view-login" class="view-section hidden auth-wrap" style="margin:-16px -14px -24px;padding:20px">
+                <div class="auth-card">
+                    <div class="auth-mark"><img src="assets/img/logo.png" alt="O’quv.uz"></div>
+                    <h1 class="auth-title">Xush kelibsiz</h1>
+                    <p class="auth-sub">O’quv.uz platformasiga kirish</p>
+
+                    <form id="form-login" class="stack mt-6">
+                        <div id="login-error-card" class="form-error hidden">
+                            <i data-lucide="alert-circle"></i>
+                            <span>Email yoki parol xato!</span>
+                        </div>
+
+                        <div id="login-pending-card" class="gate-inline hidden">
+                            <i data-lucide="hourglass"></i>
+                            <div>
+                                <b>Tasdiqlash kutilmoqda</b>
+                                <span id="login-pending-msg">Hisobingiz administrator tomonidan tasdiqlanmoqda.</span>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label class="label" for="log-email">Email</label>
+                            <div class="input-icon">
+                                <i data-lucide="mail"></i>
+                                <input type="email" id="log-email" class="input" required autocomplete="email"
+                                       placeholder="elektron@pochta.uz">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label class="label" for="log-pass">Parol</label>
+                            <div class="input-icon">
+                                <i data-lucide="lock"></i>
+                                <input type="password" id="log-pass" class="input" required autocomplete="current-password"
+                                       placeholder="••••••••">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-lg btn-block mt-2">
+                            Tizimga kirish
+                        </button>
+
+                        <p class="auth-foot">
+                            Akkaunt yo’qmi?
+                            <span class="auth-link" id="link-register" data-link="register">Yaratish</span>
+                            <span id="register-closed-note" class="form-hint hidden">Hozircha ro‘yxatdan o‘tish yopilgan</span>
+                        </p>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Register -->
+            <section id="view-register" class="view-section hidden auth-wrap" style="margin:-16px -14px -24px;padding:20px">
+                <div class="auth-card">
+                    <div class="auth-mark" style="background:linear-gradient(135deg,#f97316,#fb923c);box-shadow:0 14px 32px -12px rgba(249,115,22,.7)">
+                        <i data-lucide="user-plus"></i>
+                    </div>
+                    <h1 class="auth-title">Qo’shilish</h1>
+                    <p class="auth-sub">Platformani to’liq ishlating</p>
+
+                    <form id="form-register" class="stack mt-6">
+                        <div id="reg-error-card" class="form-error hidden">
+                            <i data-lucide="alert-octagon"></i>
+                            <span class="fw-7" id="reg-error-msg">Xatolik</span>
+                        </div>
+
+                        <div id="reg-pending-card" class="gate-inline green hidden">
+                            <i data-lucide="check-circle-2"></i>
+                            <div>
+                                <b>Ariza qabul qilindi</b>
+                                <span>Administrator tasdiqlashini kutilmoqda. Tizimga kirish sahifasiga o‘tmoqdamiz…</span>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label class="label" for="reg-name">Ism va familiya</label>
+                            <div class="input-icon">
+                                <i data-lucide="user"></i>
+                                <input type="text" id="reg-name" class="input" required placeholder="Samarat Karimov">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label class="label" for="reg-email">Email</label>
+                            <div class="input-icon">
+                                <i data-lucide="mail"></i>
+                                <input type="email" id="reg-email" class="input" required placeholder="elektron@pochta.uz">
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label class="label" for="reg-pass">Parol</label>
+                            <div class="input-icon">
+                                <i data-lucide="lock"></i>
+                                <input type="password" id="reg-pass" class="input" required minlength="6"
+                                       placeholder="Kamida 6 belgi" autocomplete="new-password">
+                            </div>
+                        </div>
+
+                        <div id="reg-group-container" class="field"></div>
+
+                        <div id="reg-closed-card" class="form-error hidden">
+                            <i data-lucide="alert-octagon"></i>
+                            <span class="fw-7">Hozircha ro‘yxatdan o‘tish yopilgan</span>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-lg btn-block mt-2">
+                            Akkaunt yaratish
+                        </button>
+
+                        <p class="auth-foot">
+                            Akkauntingiz bormi?
+                            <span class="auth-link" data-link="login">Kirish</span>
+                        </p>
+                    </form>
+                </div>
+            </section>
+
+            <!-- Dashboard -->
+            <div id="dashboard-wrapper" class="hidden">
+                <div id="dynamic-view-area"></div>
+            </div>
+
         </div>
-    </main>
 
-    <!-- Global Modals Container -->
-    <div id="modal-root" class="fixed inset-0 z-[100] hidden items-center justify-center p-4">
-        <div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm modal-backdrop"></div>
-        <div id="modal-content-area" class="relative z-10 w-full max-w-2xl animate-zoom"></div>
+        <!-- Bottom nav (mobile) -->
+        <nav id="mobile-bottom-nav" class="app-bottomnav hidden"></nav>
     </div>
 
-    <!-- MAIN APP SCRIPT -->
-    <script src="assets/js/app.js?v=18"></script>
+    <!-- ══ MODAL ══ -->
+    <div id="modal-root" class="modal-root hidden">
+        <div class="modal-backdrop" onclick="cModal()"></div>
+        <div id="modal-content-area" style="position:relative;z-index:1;width:100%;max-width:560px;display:flex;justify-content:center"></div>
+    </div>
+
+    <script type="module" src="assets/js/app.js?v=48"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js?v=20').then(() => {
-                    console.log("Service Worker registered!");
-                });
+                navigator.serviceWorker.register('/sw.js?v=48').catch(() => {});
             });
         }
     </script>

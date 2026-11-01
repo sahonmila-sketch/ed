@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3478f5"/>
+      <stop offset="0.55" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#173482"/>
+    </linearGradient>
+    <linearGradient id="board" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.5" stop-color="#ffffff"/>
+      <stop offset="0.501" stop-color="#dbeafe"/>
+      <stop offset="1" stop-color="#bfdbfe"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="url(#plate)"/>
+  <path d="M0 0 L40 0 L0 40 Z" fill="#ffffff" opacity="0.10"/>
+
+  <!-- graduation board -->
+  <path d="M32 13 L59 25 L32 37 L5 25 Z" fill="url(#board)"/>
+  <!-- cap body -->
+  <path d="M17 29.5 L47 29.5 L44 47 L20 47 Z" fill="#ffffff" opacity="0.95"/>
+  <!-- orange band -->
+  <rect x="21" y="44.5" width="22" height="5" rx="2.5" fill="#f97316"/>
+
+  <!-- sparkle -->
+  <path d="M13.5 8.5 L14.6 12.4 L18.5 13.5 L14.6 14.6 L13.5 18.5 L12.4 14.6 L8.5 13.5 L12.4 12.4 Z"
+        fill="#ffffff" opacity="0.95"/>
+
+  <!-- tassel -->
+  <path d="M55 25.5 L57.5 40" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" fill="none" opacity="0.9"/>
+  <circle cx="57.8" cy="43.4" r="4.6" fill="#f97316"/>
+  <circle cx="56.6" cy="42.2" r="1.9" fill="#ffd8ae" opacity="0.9"/>
+</svg>

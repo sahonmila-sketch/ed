@@ -1,4470 +1,4843 @@
-// SHARED GLOBAL STATE
-let STATE = { user: null, view: 'login', activeTicketId: null, activeCourseId: null };
+﻿// ============================================================
+// app.js — O’quv.uz LMS front-end
+// ============================================================
+import { setAuth, getAuthUser, getAuthToken, api_get, api_post, api_patch, api_del } from './modules/api.js';
+import {
+    safeLucide, showToast, escapeHtml, cModal, openModal, modalShell,
+    toggleSidebar, closeSidebar,
+} from './modules/ui.js';
+import { login, register, logout as authLogout, fetchMe } from './modules/auth.js';
+import {
+    renderLanding, syncLandingData, LANDING_DATA, INITIAL_LANDING,
+    openLandingEditor, saveLandingSettings,
+} from './modules/landing.js';
 
-// LANDING SYSTEM
+// ─── Globals for inline handlers ───────────────────────────────────────
+window.safeLucide = safeLucide;
+window.showToast = showToast;
+window.cModal = cModal;
+window.openModal = openModal;
+window.escapeHtml = escapeHtml;
+window.toggleSidebar = toggleSidebar;
+window.closeSidebar = closeSidebar;
+window.logout = () => { authLogout(); window.removeUserSession(); };
+window.openLandingEditor = openLandingEditor;
+window.saveLandingSettings = saveLandingSettings;
+window.go = (v) => { window.location.hash = v; };
 
-const INITIAL_LANDING = {
-    director_name: "Erko",
-    director_photo: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQwwz5HpQmffG_Lq0QO6FtRIUxnWg7U8X9pNA&s",
-    director_title: "Texnikum Rahbari",
-    telegram_link: "https://t.me/your_telegram", // SHU YERGA TELEGRAM SIZNIKINI QOYING
-    instagram_link: "https://instagram.com/",
-    
-    youtube_link: "https://youtube.com/",
-    indicators: [
-        { id: 1, label: "Professorlar", count: "25+", icon: "award" },
-        { id: 2, label: "Talabalar", count: "1,200+", icon: "users" },
-        { id: 3, label: "Muvaffaqiyatlar", count: "50+", icon: "star" }
-    ],
-    best_teachers: [
-        { id: 1, name: "Samat Jienbaev", photo: "https://api.dicebear.com/7.x/avataaars/svg?seed=Samat", title: "Senior Mentor", date: "06.04.2026" },
-        { id: 2, name: "Gulnaz Turdimuratova", photo: "https://api.dicebear.com/7.x/avataaars/svg?seed=Gulnaz", title: "Metodist", date: "05.04.2026" },
-        { id: 3, name: "Azamat Berdimuratov", photo: "https://api.dicebear.com/7.x/avataaars/svg?seed=Azamat", title: "IT Specialist", date: "06.04.2026" }
-    ]
+let STATE = {
+    user: null,
+    view: 'login',
+    activeTicketId: null,
+    activeCourseId: null,
+    activeGroupId: null,
+    quiz: null,
+    notifCount: 0,
+    // Sozlamalar yuklanmaguncha `undefined` — "ochiq" deb hisoblanadi;
+    // oxirgisi hech qachon backend 403'ini almashtirmaydi.
+    allowRegistration: undefined,
+};
+window.STATE = STATE;
+
+// Savol turlari: eski versiyalar 'miniGame' yozgan, backend hozir 'mini_game'.
+// Bitta lug'at — qat'iymaslik shu yerda chiqadi.
+// Eski "duel" turi olib tashlandi: uning savollari ham o'yin savollari hisoblanadi,
+// aks holda o'yin savol bazasi bo'sh qolib ketardi.
+const QUIZ_TYPE = (t) => (t === 'quiz' ? 'quiz' : 'mini_game');
+const QUIZ_TYPE_LABEL = {
+    mini_game: 'Mini o‘yin',
+    miniGame: 'Mini o‘yin',
+    quiz: 'Test',
 };
 
-let LANDING_DATA = INITIAL_LANDING;
-
-const syncLandingData = async () => {
-    try {
-        const res = await fetch(`${API_BASE}/landing`);
-        if (res.ok) {
-            LANDING_DATA = await res.json();
-            if (STATE.view === 'home') renderView('home');
-        }
-    } catch (e) { console.warn("Landing sync failed", e); }
+window.removeUserSession = () => {
+    STATE.user = null;
+    localStorage.removeItem('lms_user');
+    localStorage.removeItem('lms_token');
+    document.getElementById('mobile-bottom-nav')?.classList.add('hidden');
+    document.getElementById('mobile-header')?.classList.add('hidden');
 };
 
-// Landing sync logic moved to end or kept uniquely here.
-// I will keep the one at the end and remove this one to avoid duplication.
+// ══════════════════════════════════════════════════════════════════════
+//  Helpers
+// ══════════════════════════════════════════════════════════════════════
+const esc = escapeHtml;
+const num = (v) => Number(v) || 0;
 
-
-const v_home = () => {
-    if (STATE.user) return "";
-    const d = LANDING_DATA || INITIAL_LANDING;
-    const teachers = d.best_teachers || INITIAL_LANDING.best_teachers;
-    const indicators = d.indicators || INITIAL_LANDING.indicators;
-
-    return `
-        <div class="w-full relative overflow-hidden bg-white min-h-screen">
-            <div class="floating-blob top-[-200px] left-[-200px] w-[800px] h-[800px]"></div>
-            <div class="floating-blob bottom-[-200px] right-[-200px] w-[800px] h-[800px]" style="animation-delay: -10s;"></div>
-
-            <!-- Hero: Massive Impact -->
-            <div class="max-w-[1600px] mx-auto pt-32 pb-24 px-6 md:px-12 relative z-10">
-                <div class="hero-glass rounded-[5rem] p-16 md:p-32 text-center space-y-12 animate-fade border-0 shadow-[0_50px_100px_-20px_rgba(99,102,241,0.15)]">
-                    <div class="inline-flex items-center gap-3 px-8 py-3 bg-indigo-600 text-white rounded-full text-sm font-black uppercase tracking-[0.3em] shadow-lg shadow-indigo-600/30 animate-bounce-subtle">
-                         🏛️ PROF TA'LIM TEXNIKUMI
-                    </div>
-                    <h1 class="text-5xl md:text-7xl lg:text-8xl font-black text-slate-900 leading-[0.9] tracking-tighter">
-                        Innovatsion <br><span class="text-gradient">Kelajak</span> <br>Maskani
-                    </h1>
-                    <p class="text-slate-500 text-lg md:text-xl font-medium max-w-2xl mx-auto leading-relaxed">
-                        Nukus shahridagi eng yirik texnologik va professional bilim dargohi. 
-                        Biz bilan zamonaviy kasblarni egallang.
-                    </p>
-                    <div class="flex flex-col sm:flex-row items-center justify-center gap-8 pt-12">
-                        <button onclick="window.location.hash='login'" class="w-full sm:w-auto bg-indigo-600 text-white px-16 py-8 rounded-[2.5rem] font-black text-2xl shadow-2xl shadow-indigo-600/40 hover:bg-slate-900 transition-all transform hover:-translate-y-2 flex items-center justify-center gap-4">
-                            Portalga Kirish <i data-lucide="arrow-right" class="w-8 h-8"></i>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Stats: High Tech Grid -->
-            <div class="max-w-[1400px] mx-auto px-6 py-24">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-16">
-                    ${indicators.map((ind, i) => `
-                    <div class="portal-card p-16 text-center space-y-6 opacity-0 animate-slide-up border-slate-100" style="animation-delay: ${i * 0.1}s">
-                        <div class="w-24 h-24 bg-slate-50 text-indigo-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-xl group-hover:bg-indigo-600 group-hover:text-white transition-all duration-500">
-                             <i data-lucide="${ind.icon || 'star'}" class="w-12 h-12"></i>
-                        </div>
-                        <div class="text-5xl font-black text-slate-800 tabular-nums">${ind.count}</div>
-                        <div class="text-indigo-400 font-black uppercase tracking-[0.2em] text-xs">${ind.label}</div>
-                    </div>`).join('')}
-                </div>
-            </div>
-
-            <!-- Director: Massive Cinematic -->
-            <div class="max-w-[1600px] mx-auto px-6 py-40">
-                 <div class="flex flex-col lg:flex-row items-center gap-24">
-                    <div class="w-full lg:w-1/2 group relative">
-                        <div class="absolute inset-0 bg-indigo-600/10 rounded-[5rem] rotate-6 group-hover:rotate-12 transition-transform duration-1000"></div>
-                        <div class="relative aspect-square overflow-hidden rounded-[5rem] border-[16px] border-white shadow-2xl">
-                            <img src="${d.director_photo || INITIAL_LANDING.director_photo}" 
-                                 class="w-full h-full object-cover transition-transform duration-[2s] group-hover:scale-110">
-                        </div>
-                    </div>
-                    <div class="w-full lg:w-1/2 space-y-8">
-                        <div class="space-y-4">
-                            <span class="text-indigo-600 font-black tracking-[0.3em] text-[10px] uppercase px-4 py-1.5 bg-indigo-50 rounded-xl">Platforma Rahbari</span>
-                            <h2 class="text-5xl md:text-7xl font-black text-slate-900 leading-none tracking-tighter">${d.director_name || INITIAL_LANDING.director_name}</h2>
-                            <p class="text-indigo-400 font-black text-xl uppercase tracking-widest">${d.director_title || INITIAL_LANDING.director_title}</p>
-                        </div>
-                        <p class="text-slate-600 text-xl md:text-2xl leading-snug italic font-medium border-l-[8px] border-indigo-600 pl-8 py-2">
-                            "Bizning maqsadimiz — Nukus yoshlarini jahon andozalari darajasidagi kadrlar qilib yetishtirishdir."
-                        </p>
-                    </div>
-                 </div>
-            </div>
-
-            <!-- Teachers: Luxury Grid -->
-            <div class="bg-slate-50 py-40 px-6">
-                <div class="max-w-[1400px] mx-auto mb-24 flex items-center justify-between">
-                    <h2 class="text-6xl font-black text-slate-900">Eng Yaxshi <span class="text-indigo-600">Ustozlar</span></h2>
-                </div>
-                <div class="max-w-[1400px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-16">
-                    ${teachers.map((t, i) => `
-                    <div class="portal-card group overflow-hidden opacity-0 animate-slide-up bg-white" style="animation-delay: ${i * 0.15}s">
-                         <div class="relative h-[450px]">
-                            <img src="${t.photo || ''}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-[1.5s]">
-                            <div class="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/20 to-transparent p-8 flex flex-col justify-end transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
-                                <span class="text-indigo-400 text-[10px] font-black uppercase tracking-[0.2em] mb-2">Mutaxassis Mentor</span>
-                                <h3 class="text-white text-3xl font-black leading-tight mb-3">${t.name}</h3>
-                                <div class="w-12 h-1 bg-indigo-500 mb-4"></div>
-                                <p class="text-white/70 text-base font-medium">${t.title || 'Dars berish metodikasi'}</p>
-                            </div>
-                         </div>
-                    </div>`).join('')}
-                </div>
-            </div>
-
-            <!-- Map & Contact: Interactive -->
-            <div class="max-w-[1600px] mx-auto px-6 py-40">
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-24 items-center">
-                    <div class="space-y-16">
-                        <div class="space-y-6">
-                            <h2 class="text-5xl md:text-6xl font-black text-slate-900">Bizning <span class="text-indigo-600">Manzil</span></h2>
-                            <p class="text-slate-500 text-xl font-medium">Sizni Nukus shahridagi zamonaviy kampusimizda kutib qolamiz.</p>
-                        </div>
-                        <div class="space-y-12">
-                            <div class="flex items-center gap-8 group">
-                                <div class="w-20 h-20 bg-indigo-600 text-white rounded-3xl flex items-center justify-center shadow-xl group-hover:rotate-12 transition-transform">
-                                    <i data-lucide="map-pin" class="w-10 h-10"></i>
-                                </div>
-                                <div class="space-y-1">
-                                    <h4 class="text-slate-400 font-black uppercase tracking-widest text-sm">Joylashuv</h4>
-                                    <p class="text-3xl font-black text-slate-800">Nukus sh., E.Alako'z ko'chasi, 162</p>
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-8 group">
-                                <div class="w-20 h-20 bg-slate-900 text-white rounded-3xl flex items-center justify-center shadow-xl group-hover:rotate-12 transition-transform">
-                                    <i data-lucide="phone" class="w-10 h-10"></i>
-                                </div>
-                                <div class="space-y-1">
-                                    <h4 class="text-slate-400 font-black uppercase tracking-widest text-sm">Bog'lanish</h4>
-                                    <p class="text-3xl font-black text-slate-800">+998 61 222 33 44</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="relative h-[600px] rounded-[4rem] overflow-hidden shadow-2xl border-[12px] border-white">
-                        <!-- REAL GOOGLE MAP EMBED FOR NUKUS -->
-                        <iframe 
-                            src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2938.802146430349!2d59.6053351!3d42.4533038!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x41dd9a473e13d50f%3A0x633390c5211b4097!2sNukus%2C%20Uzbekistan!5e0!3m2!1sen!2s!4v1712415000000!5m2!1sen!2s" 
-                            width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Footer: Global Socials -->
-            <div class="bg-slate-950 pt-40 pb-20 px-6">
-                <div class="max-w-[1400px] mx-auto grid grid-cols-1 lg:grid-cols-4 gap-24 mb-32">
-                    <div class="lg:col-span-2 space-y-12">
-                        <div class="flex items-center gap-6">
-                            <div class="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-2xl">
-                                <i data-lucide="graduation-cap" class="text-white w-10 h-10"></i>
-                            </div>
-                            <span class="text-4xl font-black text-white italic tracking-tighter">O'quv.uz</span>
-                        </div>
-                        <p class="text-slate-400 text-2xl font-medium leading-relaxed max-w-xl">
-                            Nukus Professional ta'lim texnikumi — bilim va tajriba maskani. 
-                            Biz bilan kelajagingizni bugun quring.
-                        </p>
-                    </div>
-                    
-                    <div class="space-y-12">
-                        <h4 class="text-white text-xl font-black uppercase tracking-[0.3em]">Ijtimoiy Tarmoqlar</h4>
-                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-10">
-                             <!-- Telegram: The Real Look -->
-                             <a href="${d.telegram_link || '#'}" target="_blank" class="flex items-center gap-6 text-slate-400 hover:text-white font-black tracking-widest transition-all group">
-                                <div class="w-20 h-20 bg-[#229ED9]/10 rounded-[2rem] flex items-center justify-center group-hover:bg-[#229ED9] group-hover:shadow-[0_20px_50px_rgba(34,158,217,0.4)] transition-all duration-500">
-                                    <svg viewBox="0 0 24 24" class="w-10 h-10 fill-current" xmlns="http://www.w3.org/2000/svg"><path d="M11.944 0C5.352 0 0 5.352 0 11.944c0 6.592 5.352 11.944 11.944 11.944 6.592 0 11.944-5.352 11.944-11.944C23.888 5.352 18.536 0 11.944 0zm5.836 8.358l-1.954 9.222c-.15.68-.553.847-1.123.527l-2.977-2.195-1.436 1.382c-.159.159-.292.292-.598.292l.213-3.023 5.5-4.966c.239-.213-.052-.331-.371-.119L8.341 14.1l-2.929-.916c-.637-.199-.649-.637.133-.943l11.455-4.417c.531-.194.996.124.81.94l-.034-.406z"/></svg>
-                                </div>
-                                TELEGRAM
-                             </a>
-
-                             <!-- Instagram: The Cinematic Mesh -->
-                             <a href="${d.instagram_link || '#'}" target="_blank" class="flex items-center gap-6 text-slate-400 hover:text-white font-black tracking-widest transition-all group">
-                                <div class="w-20 h-20 bg-[#E4405F]/10 rounded-[2rem] flex items-center justify-center group-hover:bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7] group-hover:shadow-[0_20px_50px_rgba(238,42,123,0.4)] transition-all duration-500">
-                                    <svg viewBox="0 0 24 24" class="w-10 h-10 fill-current" xmlns="http://www.w3.org/2000/svg"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.266.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.267-.07-1.646-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
-                                </div>
-                                INSTAGRAM
-                             </a>
-
-                             <!-- YouTube: The Red Power -->
-                             <a href="${d.youtube_link || '#'}" target="_blank" class="flex items-center gap-6 text-slate-400 hover:text-white font-black tracking-widest transition-all group">
-                                <div class="w-20 h-20 bg-[#FF0000]/10 rounded-[2rem] flex items-center justify-center group-hover:bg-[#FF0000] group-hover:shadow-[0_20px_50px_rgba(255,0,0,0.4)] transition-all duration-500">
-                                    <svg viewBox="0 0 24 24" class="w-10 h-10 fill-current" xmlns="http://www.w3.org/2000/svg"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-                                </div>
-                                YOUTUBE
-                             </a>
-                        </div>
-                    </div>
-
-                    <div class="space-y-12 text-white">
-                         <h4 class="text-white text-xl font-black uppercase tracking-[0.3em]">Xizmatlar</h4>
-                         <ul class="space-y-6 text-slate-400 font-bold">
-                            <li><a href="#" class="hover:text-white transition-colors">Onlayn Ta'lim</a></li>
-                            <li><a href="#" class="hover:text-white transition-colors">Kutubxona</a></li>
-                            <li><a href="#" class="hover:text-white transition-colors">Yordam Markazi</a></li>
-                         </ul>
-                    </div>
-                </div>
-                <div class="text-center pt-20 border-t border-white/5 text-slate-600 text-sm font-black uppercase tracking-[0.8em]">
-                    © 2026 NUKUS PROFESSIONAL TA'LIM TEXNIKUMI PORTALI
-                </div>
-            </div>
-        </div>
-    `;
+const ROLE_LABELS = {
+    student: 'Talaba',
+    ustoz: "O’qituvchi",
+    admin: 'Administrator',
+    tech_admin: 'Tex administrator',
+    director: 'Direktor',
+    parent: 'Ota-ona',
 };
-
-window.oLandingEdit = () => {
-    const d = LANDING_DATA || INITIAL_LANDING;
-    const content = `
-    <div class="p-10 space-y-8 max-h-[85vh] overflow-y-auto bg-white rounded-[3rem]">
-        <div class="flex items-center justify-between">
-            <h2 class="text-4xl font-black text-slate-800">Landing Sozlamalari</h2>
-            <button onclick="document.getElementById('modal-root').classList.add('hidden')" class="p-2 hover:bg-slate-100 rounded-full">
-                <i data-lucide="x" class="w-6 h-6"></i>
-            </button>
-        </div>
-        
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div class="space-y-4">
-                <label class="text-xs font-black uppercase tracking-widest text-slate-400">Director Malumotlari</label>
-                <input type="text" id="edit-d-name" value="${d.director_name || ''}" class="w-full bg-slate-50 p-5 rounded-2xl border-none focus:ring-4 focus:ring-indigo-100 font-bold" placeholder="Ism">
-                <input type="text" id="edit-d-photo" value="${d.director_photo || ''}" class="w-full bg-slate-50 p-5 rounded-2xl border-none focus:ring-4 focus:ring-indigo-100 font-bold" placeholder="Foto URL">
-                <input type="text" id="edit-d-title" value="${d.director_title || ''}" class="w-full bg-slate-50 p-5 rounded-2xl border-none focus:ring-4 focus:ring-indigo-100 font-bold" placeholder="Lavozimi">
-            </div>
-            
-            <div class="space-y-4">
-                <label class="text-xs font-black uppercase tracking-widest text-slate-400">Ijtimoiy Tarmoqlar</label>
-                <input type="text" id="edit-tg" value="${d.telegram_link || ''}" class="w-full bg-slate-50 p-5 rounded-2xl border-none focus:ring-4 focus:ring-indigo-100 font-bold" placeholder="Telegram Link">
-                <input type="text" id="edit-insta" value="${d.instagram_link || ''}" class="w-full bg-slate-50 p-5 rounded-2xl border-none focus:ring-4 focus:ring-indigo-100 font-bold" placeholder="Instagram Link">
-                <input type="text" id="edit-yt" value="${d.youtube_link || ''}" class="w-full bg-slate-50 p-5 rounded-2xl border-none focus:ring-4 focus:ring-indigo-100 font-bold" placeholder="YouTube Link (Facebook olib tashlandi)">
-            </div>
-        </div>
-
-        <div class="space-y-4">
-            <label class="text-xs font-black uppercase tracking-widest text-slate-400">Ko'rsatkichlar & Ustozlar (JSON)</label>
-            <textarea id="edit-indicators" class="w-full h-32 bg-slate-50 p-6 rounded-2xl border-none font-mono text-xs">${JSON.stringify(d.indicators || [], null, 2)}</textarea>
-            <textarea id="edit-teachers" class="w-full h-40 bg-slate-50 p-6 rounded-2xl border-none font-mono text-xs">${JSON.stringify(d.best_teachers || [], null, 2)}</textarea>
-        </div>
-        
-        <button onclick="saveLandingChanges()" class="w-full bg-indigo-600 text-white py-6 rounded-[2rem] font-black text-xl shadow-xl shadow-indigo-600/30 hover:bg-slate-900 transition-all">
-            Hamma O'zgarishlarni Saqlash
-        </button>
-    </div>`;
-    document.getElementById('modal-content-area').innerHTML = content;
-    document.getElementById('modal-root').classList.replace('hidden', 'flex');
-    safeLucide(document.getElementById('modal-root'));
+const ROLE_BADGE = {
+    student: 'badge-blue',
+    ustoz: 'badge-green',
+    admin: 'badge-orange',
+    tech_admin: 'badge-violet',
+    director: 'badge-amber',
+    parent: 'badge',
 };
+const roleLabel = (r) => ROLE_LABELS[r] || r;
+const isStaff = (u = STATE.user) => !!u && ['admin', 'tech_admin', 'director', 'ustoz'].includes(u.role);
+const canManage = (u = STATE.user) => !!u && ['admin', 'tech_admin'].includes(u.role);
 
-window.saveLandingChanges = () => {
-    console.log("Saving landing changes...");
-    try {
-        const teachersRaw = document.getElementById('edit-teachers').value;
-        const indicatorsRaw = document.getElementById('edit-indicators').value;
-        
-        let teachers, indicators;
-        try {
-            teachers = JSON.parse(teachersRaw);
-        } catch (e) {
-            alert("Ustozlar ro'yxatida JSON xatosi bor!");
-            return;
-        }
-        try {
-            indicators = JSON.parse(indicatorsRaw);
-        } catch (e) {
-            alert("Ko'rsatkichlar ro'yxatida JSON xatosi bor!");
-            return;
-        }
-
-        const data = {
-            ...LANDING_DATA,
-            director_name: document.getElementById('edit-d-name').value,
-            director_photo: document.getElementById('edit-d-photo').value,
-            director_title: document.getElementById('edit-d-title').value,
-            telegram_link: document.getElementById('edit-tg').value,
-            instagram_link: document.getElementById('edit-insta').value,
-            youtube_link: document.getElementById('edit-yt').value,
-            best_teachers: teachers,
-            indicators: indicators
-        };
-        console.log("Data to save:", data);
-        
-        // Update both the specific landing variable and the main DB
-        LANDING_DATA = data;
-        let db = getDB();
-        db.landing = data;
-        saveDB(db); // This will sync everything to the server
-        
-        showToast("Landing sahifasi yangilandi!");
-        if (STATE.view === 'home') renderView('home');
-        document.getElementById('modal-root').classList.add('hidden');
-    } catch (e) { 
-        console.error("Save landing error:", e);
-        alert("Saqlashda kutilmagan xato yuz berdi!"); 
-    }
-};
-
-
-const DEFAULT_DB = {
-    users: [
-        { id: 1, email: 'talaba@lms.uz', password: '123', ism: 'Ali Valiyev', role: 'student', points: 1250, avatar: null, achievements: ['first_lesson'], progress: { 1: { completed: [1], percent: 100 } }, groupId: 1 },
-        { id: 2, email: 'ustoz@lms.uz', password: '123', ism: 'Ustoz Anvar', role: 'ustoz', points: 0, avatar: null, groupId: 1 },
-        { id: 3, email: 'admin@lms.uz', password: '123', ism: 'Asosiy Admin', role: 'admin', points: 0, avatar: null },
-        { id: 4, email: 'tech@lms.uz', password: '123', ism: 'Tech Admin', role: 'tech_admin', points: 0, avatar: null },
-        { id: 5, email: 'director@lms.uz', password: '123', ism: 'Director Xon', role: 'director', points: 0, avatar: null }
-    ],
-    tickets: [
-        { id: 101, user_id: 1, user_name: 'Ali Valiyev', message: 'Tizimga kirishda xato bor', status: 'Ochiq', replies: [] }
-    ],
-    posts: [
-        { id: 1, text: 'Xush kelibsiz', authorId: 2, approved: true, likes: 24, liked_users: [] }
-    ],
-    courses: [
-        { 
-            id: 1, 
-            title: 'JavaScript Asoslari', 
-            description: 'JavaScript dasturlash tili bo\'yicha to\'liq kurs.', 
-            authorId: 2, 
-            category: 'Dasturlash', 
-            status: 'Ochiq',
-            lessons: [
-                { id: 1, courseId: 1, title: 'Kirish', topic: 'JavaScript Kirish', content: 'Dasturlash nima?', videoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' }
-            ]
-        }
-    ],
-    books: [
-        { id: 1, title: 'Clean Code', description: 'Robert C. Martin tomonidan yozilgan dasturlash odobi haqida kitob.', image: 'https://images-na.ssl-images-amazon.com/images/I/41xShlnTZTL._SX376_BO1,204,203,200_.jpg', link: '#' },
-        { id: 2, title: 'JavaScript: The Good Parts', description: 'JavaScriptning eng yaxshi qismlari haqida qo\'llanma.', image: 'https://images-na.ssl-images-amazon.com/images/I/5131OWtQRaL._SX381_BO1,204,203,200_.jpg', link: '#' }
-    ],
-    achievements: [
-        { id: 'first_lesson', title: 'Boshlovchi', icon: '🌱', rarity: 'common', desc: 'Birinchi darsni yakunladingiz' },
-        { id: 'active_5', title: 'Faol talaba', icon: '🔥', rarity: 'rare', desc: '5 ta darsni muvaffaqiyatli yakunladingiz' },
-        { id: 'attendance_7', title: 'Intizomli', icon: '📅', rarity: 'epic', desc: '7 kunlik mukammal davomat' },
-        { id: 'top_points', title: 'Top student', icon: '👑', rarity: 'epic', desc: 'Yuqori natija va ko\'p ballar' },
-        { id: 'legend', title: 'Afsona', icon: '💎', rarity: 'legendary', desc: 'Platformadagi eng yuqori daraja' }
-    ],
-    settings: {
-        platformName: "O'quv.uz",
-        allowRegistration: true
-    },
-    groups: [
-        { id: 1, name: 'D 02 25', ustozId: 2, studentIds: [1], schedule: [] },
-        { id: 2, name: 'A 01 24', ustozId: 2, studentIds: [], schedule: [] }
-    ],
-    attendance: [
-        { id: 1, groupId: 1, date: '2026-03-20', records: { 1: 'present' } },
-        { id: 2, groupId: 1, date: '2026-03-21', records: { 1: 'absent' } }
-    ],
-    tournaments: [],
-    landing: INITIAL_LANDING,
-    chatMessages: [
-        { id: 1, groupId: 1, userId: 2, userName: 'Ustoz Anvar', text: 'Assalomu alaykum, darsga tayyormisizlar?', time: '10:00', type: 'text' },
-        { id: 2, groupId: 1, userId: 1, userName: 'Ali Valiyev', text: 'Va alaykum assalom, ha ustoz!', time: '10:05', type: 'text' }
-    ],
-    notifications: [],
-    questions: [
-        { id: 1, questionText: "2 + 2 * 2 = ?", optionA: "6", optionB: "8", optionC: "4", optionD: "10", correctAnswer: "A", type: "duel", difficulty: "medium" },
-        { id: 2, questionText: "'1' + 1 JavaScriptda natijasi qanday?", optionA: "2", optionB: "11", optionC: "NaN", optionD: "Error", correctAnswer: "B", type: "duel", difficulty: "easy" },
-        { id: 3, questionText: "typeof null nima qaytaradi?", optionA: "null", optionB: "object", optionC: "undefined", optionD: "boolean", correctAnswer: "B", type: "mini_game", difficulty: "medium" },
-        { id: 4, questionText: "0.1 + 0.2 === 0.3 ?", optionA: "true", optionB: "false", optionC: "undefined", optionD: "NaN", correctAnswer: "B", type: "mini_game", difficulty: "hard" },
-        { id: 5, questionText: "HTML da 'href' atributi qaysi tegda ishlatiladi?", optionA: "<img>", optionB: "<a>", optionC: "<div>", optionD: "<span>", correctAnswer: "B", type: "mini_game", difficulty: "easy" }
-    ]
-};
-
-const getDB = () => JSON.parse(localStorage.getItem('lms_db') || JSON.stringify(DEFAULT_DB));
-let isSyncing = false;
-const saveDB = (db) => {
-    localStorage.setItem('lms_db', JSON.stringify(db));
-    if(!isSyncing) {
-        fetch('/api/sync_db', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(db)
-        }).catch(console.warn);
-    }
-};
-
-const API_BASE = '/api';
-
-
-
-
-
-// ======================== MULTILINGUAL SYSTEM ========================
-const TRANSLATIONS = {
-    uz: {
-        dashboard: "Boshqaruv", courses: "Kurslar", posts: "Postlar", support: "Yordam",
-        profile: "Profil", chat: "Guruh Chat", leaderboard: "Reyting", library: "Kutubxona",
-        duel: "Duel 1vs1", game: "Mini O'yin", attendance: "Davomat", users: "Foydalanuvchilar",
-        groups: "Guruhlar", questions: "Savollar", analytics: "Analitika", notifications: "Bildirishnomalar",
-        logout: "Chiqish", student: "Talaba", ustoz: "Ustoz", admin: "Admin",
-        tech_admin: "Tex Admin", director: "Direktor", schedule: "Jadval",
-        today: "Bugun", present: "Keldi", absent: "Kelmadi",
-        timerMsg: "20 daqiqa to'liq kuting — XP beriladi!",
-        timerDone: "XP berildi! 🎉", timerPaused: "Tab o'zgardi — taymer to'xtatildi!",
-        langLabel: "Til:"
-    },
-    ru: {
-        dashboard: "Панель", courses: "Курсы", posts: "Посты", support: "Поддержка",
-        profile: "Профиль", chat: "Чат группы", leaderboard: "Рейтинг", library: "Библиотека",
-        duel: "Дуэль 1vs1", game: "Мини игра", attendance: "Посещаемость", users: "Пользователи",
-        groups: "Группы", questions: "Вопросы", analytics: "Аналитика", notifications: "Уведомления",
-        logout: "Выход", student: "Студент", ustoz: "Учитель", admin: "Администратор",
-        tech_admin: "Тех Админ", director: "Директор", schedule: "Расписание",
-        today: "Сегодня", present: "Присутствует", absent: "Отсутствует",
-        timerMsg: "Подождите 20 минут — начислятся XP!",
-        timerDone: "XP начислены! 🎉", timerPaused: "Вкладка изменена — таймер остановлен!",
-        langLabel: "Язык:"
-    }
-};
-let CURRENT_LANG = localStorage.getItem('lms_lang') || 'uz';
-const t = (key) => (TRANSLATIONS[CURRENT_LANG] || TRANSLATIONS.uz)[key] || key;
-window.switchLang = (lang) => {
-    CURRENT_LANG = lang;
-    localStorage.setItem('lms_lang', lang);
-    renderSidebar();
-    if (STATE.view) renderView(STATE.view);
-};
-
-// ======================== 20-MIN LESSON TIMER ========================
-let LESSON_TIMER_INTERVAL = null;
-let LESSON_TIMER_SEC = 0;
-let LESSON_TIMER_ACTIVE = false;
-let LESSON_TIMER_LESSON_ID = null;
-
-function startLessonTimer(lessonId) {
-    if (LESSON_TIMER_INTERVAL) clearInterval(LESSON_TIMER_INTERVAL);
-    LESSON_TIMER_SEC = 0;
-    LESSON_TIMER_ACTIVE = true;
-    LESSON_TIMER_LESSON_ID = lessonId;
-    updateLessonTimerUI();
-    LESSON_TIMER_INTERVAL = setInterval(() => {
-        if (!LESSON_TIMER_ACTIVE) return;
-        LESSON_TIMER_SEC++;
-        updateLessonTimerUI();
-        if (LESSON_TIMER_SEC >= 1200) { // 20 minutes = 1200 seconds
-            clearInterval(LESSON_TIMER_INTERVAL);
-            LESSON_TIMER_ACTIVE = false;
-            // Grant XP
-            addPoints(15, "20 daqiqa dars o'qildi", "lessons");
-            const timerEl = document.getElementById('lesson-timer-box');
-            if (timerEl) {
-                timerEl.className = 'lesson-timer-box done';
-                timerEl.innerHTML = `<span class="timer-icon">✅</span><span>${t('timerDone')}</span>`;
-            }
-        }
-    }, 1000);
+function initials(name = '') {
+    return String(name).trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?';
 }
+
+function avatarHtml(user, cls = 'avatar-sm', extra = '') {
+    const name = user?.ism || user?.user_name || user?.name || '?';
+    if (user?.avatar) {
+        return `<div class="avatar ${cls} ${extra}"><img src="${esc(user.avatar)}" alt="${esc(name)}" loading="lazy"></div>`;
+    }
+    return `<div class="avatar ${cls} ${extra}">${esc(initials(name))}</div>`;
+}
+
+function statTile({ label, value, icon, tone = '', foot = '', href = '', onclick = '' }) {
+    const tag = href ? 'a' : 'div';
+    return `
+        <${tag} ${href ? `href="${href}"` : ''} ${onclick ? `onclick="${onclick}"` : ''}
+            class="stat ${tag === 'a' ? 'card-hover' : ''}">
+            <div class="stat-head">
+                <div class="stat-icon ${tone}"><i data-lucide="${icon}"></i></div>
+                <div class="stat-label">${esc(label)}</div>
+            </div>
+            <div class="stat-value">${value}</div>
+            ${foot ? `<div class="stat-foot mt-1">${foot}</div>` : ''}
+        </${tag}>`;
+}
+
+function emptyState(icon, title, sub = '', action = '') {
+    return `
+        <div class="empty">
+            <div class="empty-icon"><i data-lucide="${icon}"></i></div>
+            <div class="empty-title">${esc(title)}</div>
+            ${sub ? `<div class="empty-sub">${esc(sub)}</div>` : ''}
+            ${action}
+        </div>`;
+}
+
+function pageHead(title, sub = '', actions = '') {
+    return `
+        <div class="page-head">
+            <div style="min-width:0">
+                <h1 class="page-title">${esc(title)}</h1>
+                ${sub ? `<p class="page-sub">${esc(sub)}</p>` : ''}
+            </div>
+            ${actions ? `<div class="d-flex items-center gap-2 flex-wrap">${actions}</div>` : ''}
+        </div>`;
+}
+
+function sectionCard(title, body, { icon = '', actions = '', pad = 'card-pad', sub = '' } = {}) {
+    return `
+        <section class="card ${pad}">
+            ${title ? `
+            <div class="card-head">
+                <div class="d-flex items-center gap-3" style="min-width:0">
+                    ${icon ? `<div class="card-icon">${icon}</div>` : ''}
+                    <div style="min-width:0">
+                        <div class="card-title">${esc(title)}</div>
+                        ${sub ? `<div class="card-sub">${esc(sub)}</div>` : ''}
+                    </div>
+                </div>
+                ${actions}
+            </div>` : ''}
+            ${body}
+        </section>`;
+}
+
+function gradePill(v) {
+    return `<span class="grade-pill g${v}">${v}</span>`;
+}
+
+function progressBar(pct, tone = '') {
+    const p = Math.max(0, Math.min(100, num(pct)));
+    return `<div class="progress"><div class="progress-bar ${tone}" style="width:${p}%"></div></div>`;
+}
+
+/**
+ * Загружает данные и вставляет результат в контейнер.
+ * fn должна вернуть HTML-строку (или массив строк).
+ * Если пользователь успел уйти на другую страницу — ничего не вставляем.
+ */
+function mount(id, fn, onErrorTitle = 'Yuklab bo‘lmadi') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = `<div class="loading-box"><span class="spinner"></span> Yuklanmoqda…</div>`;
+    Promise.resolve()
+        .then(fn)
+        .then((html) => {
+            const node = document.getElementById(id);
+            if (!node) return;                     // страница сменилась
+            node.innerHTML = Array.isArray(html) ? html.join('') : (html ?? '');
+            safeLucide(node);
+            animateIn(node);
+        })
+        .catch((e) => {
+            const node = document.getElementById(id);
+            if (!node) return;
+            node.innerHTML = emptyState('triangle-alert', onErrorTitle, e?.message || '', `
+                <button class="btn btn-outline btn-sm" onclick="location.reload()">
+                    <i data-lucide="refresh-cw"></i> Qayta urinish
+                </button>`);
+            safeLucide(node);
+            animateIn(node);
+        });
+}
+
+// ── Animatsiyalar ───────────────────────────────────────────────────
+// CSS'da `.fade-in` / `.slide-up` / `.stagger` sinflari bor edi, lekin
+// hech kim ularni qo'ymagan edi — shuning uchun sayt statik ko'rinyotgan.
+// Bu yerga ulab, har bir sahifa ochilishida kirish animatsiyasi va
+// qatorlar uchun ketma-ket (stagger) ko'rsatilish qo'shildi.
+
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Sahifa kontentiga kirish animatsiyasi + bolalarni ketma-ket ko'rsatadi. */
+function animateIn(root) {
+    // Yashirin tabda CSS animatsiyalar boshlanmaydi, `opacity:0` da qolib
+    // ketadi — shuning uchun ko'rinmaydigan holatda umuman qo'shmaymiz.
+    if (!root || REDUCED_MOTION || document.hidden) return;
+    root.classList.add('view-enter');
+    // Blok darajasidagi birinchi bolalar ketma-ket paydo bo'ladi.
+    Array.from(root.children).slice(0, 12).forEach((k, i) => {
+        if (!(k instanceof HTMLElement)) return;
+        k.classList.add('stagger');
+        k.style.setProperty('--stagger-i', String(i));
+    });
+    // Ro'yxa qatorlari va statistika plitalari ham ketma-ket keladi.
+    root.querySelectorAll('.list > .list-row, .grid > .stat').forEach((row, i) => {
+        if (i > 11) return;
+        row.classList.add('stagger');
+        row.style.setProperty('--stagger-i', String(i));
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Data layer
+// ══════════════════════════════════════════════════════════════════════
+const getPosts = () => api_get('/posts');
+const getCourses = () => api_get('/courses');
+const getTickets = () => api_get('/tickets');
+const getGroups = () => api_get('/groups');
+const getUsers = () => api_get('/users');
+const getAttendance = () => api_get('/attendance');
+const getLeaderboard = () => api_get('/users/leaderboard');
+const getQuestions = () => api_get('/questions');
+const getBooks = () => api_get('/books');
+const getAchievements = () => api_get('/achievements');
+const getNotifications = () => api_get('/notifications');
+const getMyAttendance = () => api_get('/attendance/my');
+const getGrades = () => api_get('/grades');
+const getStudentGrades = (sid) => api_get(`/grades/student/${sid}`);
+const getParentChild = () => api_get('/parent/child');
+const getParentAtt = () => api_get('/parent/child/attendance');
+const getParentReport = () => api_get('/parent/child/report');
+const getSettingsAPI = () => api_get('/settings');
+const getShop = () => api_get('/shop');
+const getPendingUsers = () => api_get('/users/pending');
+const getMyPurchases = () => api_get('/shop/purchases');
+const setUserStatus = (id, status) => api_patch(`/users/${id}/status`, { status });
+const buyItem = (id) => api_post(`/shop/${id}/buy`, {});
+
+async function loadUserData() {
+    if (!getAuthToken()) { STATE.user = null; return null; }
+    try {
+        const user = await fetchMe();
+        if (!user) { window.removeUserSession(); return null; }
+        STATE.user = user;
+        localStorage.setItem('lms_user', JSON.stringify(user));
+        loadLessonMinutes();
+        return user;
+    } catch {
+        window.removeUserSession();
+        return null;
+    }
+}
+
+// Dars uzunligi sozlanadi (standart 20 daqiqa) — bir marta yuklab olamiz
+let __lessonMinLoaded = false;
+async function loadLessonMinutes() {
+    if (__lessonMinLoaded) return;
+    __lessonMinLoaded = true;
+    try {
+        const s = await api_get('/settings');
+        if (s && Number(s.lessonMinutes) > 0) LESSON_NEEDED_SEC = Number(s.lessonMinutes) * 60;
+    } catch { /* standart qiymat qoladi */ }
+}
+window.loadLessonMinutes = loadLessonMinutes;
+
+async function getMyGroup() {
+    const groups = await getGroups();
+    if (!STATE.user) return null;
+    if (STATE.user.groupId) return groups.find(g => g.id === STATE.user.groupId) || null;
+    if (STATE.user.role === 'ustoz') return groups.find(g => g.ustozId === STATE.user.id) || null;
+    if (isStaff()) return groups[0] || null;
+    return null;
+}
+
+function courseProgress(course) {
+    const p = STATE.user?.progress?.[String(course.id)];
+    return p?.percent || 0;
+}
+function courseCompleted(course) {
+    const p = STATE.user?.progress?.[String(course.id)];
+    return p?.completed || [];
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  XP / achievements
+// ══════════════════════════════════════════════════════════════════════
+let LAST_BONUS_TIME = Number(localStorage.getItem('lms_bonus_at') || 0);
+
+function canClaimBonus() {
+    return Date.now() - LAST_BONUS_TIME > 20 * 60 * 1000;
+}
+
+async function addPoints(pts, reason = '', category = 'other') {
+    try {
+        const res = await api_post('/xp/add', { amount: pts, category, reason });
+        if (res.xpGained > 0) {
+            showToast(`+${res.xpGained} XP — ${reason || 'Ball qo\'shildi'}`, 'success');
+            await loadUserData();
+            updateHeaderUser();
+        } else if (res.message) {
+            showToast(res.message, 'info');
+        }
+        (res.newAchievements || []).forEach(showAchievementUnlock);
+        return res;
+    } catch (e) {
+        showToast(e.message, 'error');
+        return null;
+    }
+}
+
+async function claimDailyBonus(btn) {
+    if (!canClaimBonus()) {
+        showToast('Kunlik bonus endi tayyor emas', 'info');
+        return;
+    }
+    btn.disabled = true;
+    const res = await addPoints(20, 'Kunlik bonus', 'other');
+    if (res?.xpGained > 0) {
+        LAST_BONUS_TIME = Date.now();
+        localStorage.setItem('lms_bonus_at', String(LAST_BONUS_TIME));
+        if (btn) btn.closest('[data-bonus]')?.classList.add('hidden');
+    } else if (btn) {
+        btn.disabled = false;
+    }
+}
+window.claimDailyBonus = claimDailyBonus;
+
+const RARITY_META = {
+    common: { label: 'Oddiy', cls: 'rarity-common' },
+    rare: { label: 'Kamay', cls: 'rarity-rare' },
+    epic: { label: 'Epik', cls: 'rarity-epic' },
+    legendary: { label: 'Legendar', cls: 'rarity-legendary' },
+};
+
+function showAchievementUnlock(ach) {
+    const root = document.createElement('div');
+    root.className = 'unlock-root';
+    const meta = RARITY_META[ach.rarity] || RARITY_META.common;
+    root.innerHTML = `
+        <div class="unlock-card ${meta.cls}">
+            <div class="unlock-emoji">${esc(ach.icon || '🏆')}</div>
+            <div class="t-xs fw-8 tracking-widest upper c-accent mt-2">Yutuq ochildi</div>
+            <h3 class="mt-2" style="font-size:1.25rem">${esc(ach.title)}</h3>
+            <p class="t-sm c-muted mt-2" style="line-height:1.5">${esc(ach.desc || '')}</p>
+            <div class="badge ${ach.rarity === 'legendary' ? 'badge-orange' : 'badge-blue'} mt-4">${meta.label}</div>
+        </div>`;
+    root.addEventListener('click', () => root.remove());
+    document.body.appendChild(root);
+    safeLucide(root);
+    setTimeout(() => root.remove(), 5000);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Lesson timer
+// ══════════════════════════════════════════════════════════════════════
+const LESSON_REQUIRED_SEC = 20 * 60;
+let LESSON_NEEDED_SEC = LESSON_REQUIRED_SEC;
+let TIMER = { interval: null, sec: 0, active: false, lessonId: null, sessionId: null };
 
 function stopLessonTimer() {
-    LESSON_TIMER_ACTIVE = false;
-    if (LESSON_TIMER_INTERVAL) clearInterval(LESSON_TIMER_INTERVAL);
-    LESSON_TIMER_SEC = 0;
-    LESSON_TIMER_LESSON_ID = null;
+    clearInterval(TIMER.interval);
+    TIMER = { interval: null, sec: 0, active: false, lessonId: null, sessionId: null };
 }
 
-function pauseLessonTimer() {
-    if (!LESSON_TIMER_ACTIVE) return;
-    LESSON_TIMER_ACTIVE = false;
-    LESSON_TIMER_SEC = 0; // Reset on tab switch!
+async function startLessonTimer(lessonId) {
+    stopLessonTimer();
+    TIMER = { interval: null, sec: 0, active: true, lessonId };
+    const res = await api_post(`/lessons/${lessonId}/start`);
+    TIMER.sessionId = res.sessionId;
+    if (res.requiredSeconds) LESSON_NEEDED_SEC = res.requiredSeconds;
+    TIMER.sec = Math.min(res.alreadySec || 0, LESSON_NEEDED_SEC);
+    TIMER.interval = setInterval(() => {
+        if (updateLessonTimerUI()) return;     // true = vaqt tugadi
+        TIMER.sec++;
+        updateLessonTimerUI();
+    }, 1000);
     updateLessonTimerUI();
-    showToast(t('timerPaused'), 'error');
 }
+window.startLessonTimer = startLessonTimer;
 
+// true qaytaradi, agar timer endi tugagan bo'lsa (bir marta chaqiriladi)
 function updateLessonTimerUI() {
-    const el = document.getElementById('lesson-timer-box');
-    if (!el) return;
-    const mins = Math.floor(LESSON_TIMER_SEC / 60);
-    const secs = LESSON_TIMER_SEC % 60;
-    const percent = Math.min(100, Math.round((LESSON_TIMER_SEC / 1200) * 100));
-    el.innerHTML = `
-        <div class="timer-ring-wrap">
-            <svg viewBox="0 0 44 44" class="timer-ring">
-                <circle cx="22" cy="22" r="18" fill="none" stroke="#e0e7ff" stroke-width="4"/>
-                <circle cx="22" cy="22" r="18" fill="none" stroke="#4f46e5" stroke-width="4"
-                    stroke-dasharray="113" stroke-dashoffset="${113 - (113 * percent / 100)}"
-                    stroke-linecap="round" style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:center"/>
-            </svg>
-            <span class="timer-text">${mins}:${secs.toString().padStart(2,'0')}</span>
-        </div>
-        <div class="timer-msg">${t('timerMsg')} <b>${percent}%</b></div>
-    `;
-}
+    const box = document.getElementById('timer-box');
+    if (!box) return false;
+    const left = Math.max(0, LESSON_NEEDED_SEC - TIMER.sec);
+    const done = left === 0;
+    const wasDone = box.classList.contains('done');
+    box.classList.toggle('done', done);
 
-// Tab visibility control for lesson timer
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden && LESSON_TIMER_ACTIVE) {
-        pauseLessonTimer();
+    const text = document.getElementById('timer-text');
+    if (text) text.textContent = `${String(Math.floor(TIMER.sec / 60)).padStart(2, '0')}:${String(TIMER.sec % 60).padStart(2, '0')}`;
+
+    const ring = document.getElementById('timer-ring');
+    if (ring) {
+        const c = 2 * Math.PI * 20;
+        const pct = Math.min(1, TIMER.sec / LESSON_NEEDED_SEC);
+        ring.style.strokeDasharray = `${c}`;
+        ring.style.strokeDashoffset = `${c * (1 - pct)}`;
     }
-});
-window.addEventListener('blur', () => {
-    if (LESSON_TIMER_ACTIVE) pauseLessonTimer();
-});
 
-const syncBackend = async () => {
-    try {
-        isSyncing = true;
-        const res = await fetch(`${API_BASE}/db`);
-        if(res.ok) {
-            const serverDb = await res.json();
-            if(serverDb && serverDb.users) {
-                const oldDbString = localStorage.getItem('lms_db');
-                const newDbString = JSON.stringify(serverDb);
-                
-                if (oldDbString !== newDbString) {
-                    const localUser = JSON.parse(localStorage.getItem('lms_user'));
-                    if (localUser && serverDb.users) {
-                        const latestUser = serverDb.users.find(u => u.id === localUser.id);
-                        if (latestUser) {
-                            localStorage.setItem('lms_user', JSON.stringify(latestUser));
-                            STATE.user = latestUser;
-                        }
-                    }
-                    localStorage.setItem('lms_db', newDbString);
-                    if (serverDb.landing) LANDING_DATA = serverDb.landing;
-                    
-                    const activeTag = document.activeElement ? document.activeElement.tagName : '';
-                    const isTyping = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
-                    
-                    if (!isTyping && ['posts', 'courses', 'course-detail', 'schedule', 'student-dashboard', 'ustoz-dashboard', 'admin-dashboard', 'chat', 'home'].includes(STATE.view)) {
-                        renderView(STATE.view);
-                    }
-                }
-            }
-        }
-    } catch(err) {
-        console.warn("Backend sync failed:", err);
-    } finally {
-        isSyncing = false;
-    }
-};
-
-
-
-
-
-
-
-
-document.addEventListener('DOMContentLoaded', () => {
-    // Migration: ensure database has all required keys if coming from older version
-    let db = getDB();
-    let updated = false;
-    
-    if (!db.groups) { db.groups = DEFAULT_DB.groups; updated = true; }
-    if (!db.attendance) { db.attendance = DEFAULT_DB.attendance; updated = true; }
-    if (!db.chatMessages) { db.chatMessages = DEFAULT_DB.chatMessages; updated = true; }
-    if (!db.books) { db.books = DEFAULT_DB.books; updated = true; }
-    if (!db.questions) { db.questions = DEFAULT_DB.questions; updated = true; }
-    if (!db.staffChatMessages) { db.staffChatMessages = []; updated = true; }
-    
-    db.users.forEach(u => {
-        if (u.id === 1 && !u.groupId) { u.groupId = 1; updated = true; }
-        if (u.id === 2 && !u.groupId) { u.groupId = 1; updated = true; }
-    });
-    
-    if (updated) saveDB(db);
-    
-    STATE.user = JSON.parse(localStorage.getItem('lms_user'));
-    // Update active session migration
-    if (STATE.user && (STATE.user.id === 1 || STATE.user.id === 2) && !STATE.user.groupId) {
-        STATE.user.groupId = 1;
-        localStorage.setItem('lms_user', JSON.stringify(STATE.user));
-    }
-    setupInteractions();
-    handleRoute();
-    window.addEventListener('hashchange', handleRoute);
-    checkOnboarding();
-    
-    // Initial sync with backend
-    syncBackend(); syncLandingData();
-    setInterval(() => { syncBackend(); syncLandingData(); }, 5000); // 5s for better real-time feel
-});
-
-
-window.saveLandingData = async (data) => {
-    try {
-        const res = await fetch(`${API_BASE}/landing`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
-        if (res.ok) {
-            LANDING_DATA = await res.json();
-            showToast("Landing sahifasi yangilandi!");
-            if (STATE.view === 'home') renderView('home');
-        }
-    } catch (e) { showToast("Xatolik yuz berdi", "error"); }
-};
-
-function safeLucide(root = document) { try { if (window.lucide) lucide.createIcons({ root }); } catch (e) { } }
-
-function showToast(msg, type = 'success') {
-    const c = document.getElementById('toast-container');
-    const t = document.createElement('div');
-    const bg = type === 'error' ? 'bg-red-500' : 'bg-slate-900';
-    t.className = `p-4 rounded-xl shadow-xl text-white font-bold text-sm ${bg} animate-slide-right flex gap-3`;
-    t.innerHTML = `<i data-lucide="${type === 'error' ? 'alert-circle' : 'check-circle'}"></i><span>${msg}</span>`;
-    c.appendChild(t); safeLucide(t);
-    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
-}
-
-function checkOnboarding() {
-    if (!localStorage.getItem('intro_seen')) {
-        const mdl = document.getElementById('intro-modal');
-        mdl.classList.remove('hidden');
-
-        let slide = 1;
-        const fn = () => {
-            const current = document.querySelector('.intro-slide.active');
-            if (current) {
-                current.classList.remove('active');
-                current.classList.add('animate-fade'); // fade out effect
-            }
-
-            document.querySelectorAll('.slide-dot').forEach(d => d.classList.remove('active'));
-
-            const nxt = document.querySelector(`.intro-slide[data-slide="${slide}"]`);
-            if (nxt) {
-                nxt.classList.add('active');
-                nxt.classList.add('animate-slide-up'); // professional entrance
-                document.querySelectorAll('.slide-dot')[slide - 1].classList.add('active');
-                safeLucide(nxt);
-            } else { closeIntro(); }
-        };
-        document.getElementById('btn-next-intro').onclick = () => { slide++; fn(); };
-        document.getElementById('btn-skip-intro').onclick = closeIntro;
-    }
-}
-function closeIntro() {
-    localStorage.setItem('intro_seen', '1');
-    document.getElementById('intro-modal').classList.add('hidden');
-}
-
-function handleRoute() {
-    let hash = window.location.hash.replace('#', '') || 'home';
-    if (!STATE.user && !['register', 'login', 'home'].includes(hash)) hash = 'home';
-    if (STATE.user && (hash === 'login' || hash === 'register' || hash === 'home')) hash = `${STATE.user.role}-dashboard`;
-    STATE.view = hash;
-
-    const wrapper = document.getElementById('dashboard-wrapper');
-    const sidebar = document.getElementById('sidebar-container');
-    const main = document.getElementById('main-content');
-    
-    // Hide all main views first
-    ['login', 'register', 'home'].forEach(v => {
-        const el = document.getElementById(`view-${v}`);
-        if(el) { el.style.display = 'none'; el.style.opacity = '0'; }
-    });
-
-    if (hash === 'login' || hash === 'register' || hash === 'home') {
-        const v = document.getElementById(`view-${hash}`);
-        if (v) {
-            v.style.display = hash === 'home' ? 'block' : 'flex';
-            v.style.opacity = '1';
-            v.classList.remove('hidden');
-            v.classList.add('animate-slide-up');
-        }
-        wrapper.style.display = 'none';
-        sidebar.classList.add('hidden');
-        main.classList.remove('lg:ml-72');
-        if (hash === 'register') renderRegisterGroups();
-        if (hash === 'home') renderView('home');
+    const msg = document.getElementById('timer-msg');
+    const btn = document.getElementById('timer-btn');
+    const lock = document.getElementById('video-lock');
+    if (done) {
+        if (msg) msg.innerHTML = '<b>Tayyor!</b> Video ochildi va ball qo‘shildi.';
+        if (btn) btn.disabled = false;
+        if (lock) lock.classList.add('open');
+        if (!wasDone) window.__unlockLessonVideo();
     } else {
-        wrapper.style.display = 'block';
-        sidebar.classList.remove('hidden');
-        sidebar.classList.add('flex');
-        main.classList.add('lg:ml-72');
-        renderSidebar();
-        renderView(hash);
-        syncBackend();
-        syncLandingData();
-    }
-    safeLucide();
-}
-
-// Premium Points & Levels System
-// Hardened Point System with Anti-Spam Throttle
-let LAST_POINT_TIME = 0;
-const addPoints = (pts, reason = "", category = "other") => {
-    const nowTime = Date.now();
-    if (nowTime - LAST_POINT_TIME < 2000) { // 2 second throttle
-        console.warn("Spam detected: point addition throttled");
-        return;
-    }
-    LAST_POINT_TIME = nowTime;
-
-    let db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    if (!u) return;
-    
-    const today = new Date().toISOString().split('T')[0];
-    if (u.lastPointDate !== today) {
-        u.dailyCategoryPoints = { lessons: 0, duels: 0, miniGame: 0, other: 0 };
-        u.lastPointDate = today;
-    }
-    u.dailyCategoryPoints = u.dailyCategoryPoints || { lessons: 0, duels: 0, miniGame: 0, other: 0 };
-
-    const LIMITS = {
-        lessons: 50,
-        duels: 100,
-        miniGame: 30,
-        other: 20
-    };
-
-    const currentPts = u.dailyCategoryPoints[category] || 0;
-    const maxPts = LIMITS[category] || 20;
-
-    if (currentPts >= maxPts) {
-        showToast(`${category} bo'yicha kunlik limit tugadi`, "error");
-        return;
-    }
-
-    const canAdd = Math.min(pts, maxPts - currentPts);
-    u.points = (u.points || 0) + Math.max(0, canAdd);
-    u.dailyCategoryPoints[category] = currentPts + canAdd;
-
-    saveDB(db);
-    STATE.user = JSON.parse(JSON.stringify(u)); 
-    localStorage.setItem('lms_user', JSON.stringify(STATE.user));
-    if (reason && canAdd > 0) showToast(`+${canAdd} XP: ${reason}`, 'success');
-    
-    checkAchievements(STATE.user, db);
-};
-
-const notifyAdmin = (msg) => {
-    let db = getDB();
-    db.notifications = db.notifications || [];
-    db.notifications.push({
-        id: Date.now() + Math.random(),
-        userId: 'admin_broadcast', // Broad message for any admin to see
-        msg: msg,
-        date: new Date().toLocaleDateString('uz-UZ', { year: 'numeric', month: 'long', day: 'numeric' }),
-        type: 'info',
-        seen: false
-    });
-    saveDB(db);
-};
-
-const getUserStats = (u) => {
-    const db = getDB();
-    const completedLessons = Object.keys(u.progress || {}).length;
-    const postsCount = (db.posts || []).filter(p => p.authorId === u.id).length;
-    
-    const myAtt = (db.attendance || []).filter(a => a.groupId === u.groupId);
-    const presentCount = myAtt.filter(a => a.records?.[u.id] === 'present').length;
-    const attendancePercent = myAtt.length > 0 ? Math.round((presentCount / myAtt.length) * 100) : 100;
-
-    // Slow Level Progress Formula: XP = 100 * (2^L - 1)
-    let level = 1;
-    let totalXP = u.points || 0;
-    while (totalXP >= 100 * (Math.pow(2, level) - 1)) {
-        level++;
-    }
-    const currentLevelThreshold = 100 * (Math.pow(2, level - 1) - 1);
-    const nextLevelThreshold = 100 * (Math.pow(2, level) - 1);
-    const progressXP = totalXP - currentLevelThreshold;
-    const levelRange = nextLevelThreshold - currentLevelThreshold;
-    const levelPercent = Math.min(100, Math.round((progressXP / levelRange) * 100));
-
-    return {
-        points: u.points || 0,
-        completedLessons,
-        duelWins: u.duelWins || 0,
-        attendance: attendancePercent,
-        posts: postsCount,
-        level,
-        levelPercent
-    };
-};
-
-const checkAchievements = (u, db) => {
-    const unlocked = u.achievements || [];
-    const push = (id) => { 
-        if (!unlocked.includes(id)) { 
-            const dbU = db.users.find(x => x.id === u.id);
-            if (!dbU.achievements) dbU.achievements = [];
-            dbU.achievements.push(id);
-            saveDB(db);
-            showAchievementUnlock(id); 
-        } 
-    };
-    
-    const lessonCount = Object.keys(u.progress || {}).length;
-    if (lessonCount >= 3) push('first_lesson');
-    if (lessonCount >= 15) push('active_5'); // Harder: 15 lessons
-    if (u.points >= 5000) push('top_points'); // Harder: 5000 XP
-    if (u.points >= 15000) push('legend'); // Harder: 15000 XP
-    if (u.duelWins >= 50) push('attendance_7'); // Repurposing badge for duel mastery
-};
-
-const showAchievementUnlock = (id) => {
-    const db = getDB();
-    const ach = db.achievements.find(a => a.id === id);
-    if (!ach) return;
-
-    const div = document.createElement('div');
-    div.className = 'fixed inset-0 z-[2000] flex items-center justify-center pointer-events-none';
-    div.innerHTML = `
-        <div class="bg-white p-12 rounded-[4rem] shadow-[0_0_100px_rgba(79,70,229,0.2)] border border-indigo-50 text-center animate-achievement-pop pointer-events-auto relative">
-            <div class="absolute -inset-4 bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 rounded-[4.5rem] blur-xl animate-pulse"></div>
-            <div class="relative">
-                <div class="text-7xl mb-6">${ach.icon}</div>
-                <p class="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-500 mb-2">Yangi Yutuq!</p>
-                <h2 class="text-4xl font-black text-slate-800 mb-4">${ach.title}</h2>
-                <p class="text-slate-500 font-bold mb-8">${ach.desc}</p>
-                <button onclick="this.parentElement.parentElement.parentElement.remove()" class="bg-slate-900 text-white px-10 py-4 rounded-2xl font-black text-sm">Ajoyib!</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(div);
-};
-
-function renderRegisterGroups() {
-    try {
-        const db = getDB();
-        const container = document.getElementById('reg-group-container');
-        if (!container) return;
-        
-        const groups = db.groups || [];
-        if (groups.length === 0) {
-            container.innerHTML = `<p class="text-[10px] text-red-500 font-bold p-1">Hozircha guruhlar mavjud emas</p>`;
-            return;
+        if (msg) msg.innerHTML = `Video ochilishi uchun <b>${Math.ceil(left / 60)} daqiqa</b> qoldi.`;
+        if (btn) btn.disabled = true;
+        if (lock) {
+            const lb = lock.querySelector('.video-lock-left');
+            if (lb) lb.textContent = `${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
         }
-
-        container.innerHTML = `
-            <select id="reg-group" required class="w-full bg-white border border-slate-200 rounded-2xl px-5 py-4 text-slate-800 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold appearance-none">
-                <option value="" selected>Guruhsiz davom etish (Yoki guruh tanlang)</option>
-                ${groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
-            </select>
-            <div class="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                <i data-lucide="chevron-down" class="w-5 h-5"></i>
-            </div>
-        `;
-        safeLucide(container);
-    } catch (e) {
-        console.error("renderRegisterGroups error:", e);
     }
+    return done && !wasDone;
 }
 
-function renderMobileNav() { } // Removed as per UI cleanup request
+// Timer tugadi: qufulni ochamiz, videoni ko'rsatamiz va ball qo'shamiz
+window.__unlockLessonVideo = async () => {
+    const lid = TIMER.lessonId;
+    if (!lid || TIMER.unlockedFor === lid) return;
+    TIMER.unlockedFor = lid;
+    stopLessonTimer();
+    try {
+        const res = await completeLessonServer(lid);
+        window.__swapToVideo(lid, res);
+    } catch (e) {
+        showToast(e.message || 'Darsni yakunlab bo‘lmadi', 'error');
+    }
+};
+
+// Video konteynerini "qufuli" holatdan haqiqiy videoga almashtiramiz
+window.__swapToVideo = (lessonId, res) => {
+    const lock = document.getElementById('video-lock');
+    const holder = document.getElementById('video-holder');
+    const url = window.__videoUrls?.[lessonId];
+    if (holder && url && !holder.dataset.ready) {
+        holder.dataset.ready = '1';
+        holder.innerHTML = `
+            <iframe src="${esc(url)}" allowfullscreen
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                    title="Dars videosi"></iframe>`;
+    }
+    if (lock) lock.remove();
+    const box = document.getElementById('timer-box');
+    if (box) box.classList.add('unlocked');
+    if (res && res.xpGained > 0) {
+        const xb = document.getElementById('lesson-xp');
+        if (xb) { xb.innerHTML = `<i data-lucide="zap"></i> +${res.xpGained} XP`; xb.classList.add('show'); safeLucide(xb); }
+    }
+    const btn = document.getElementById('timer-btn');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Darsni yakunlandi deb belgilash'; safeLucide(btn); }
+};
+
+async function completeLessonServer(lessonId) {
+    const res = await api_post(`/lessons/${lessonId}/complete`);
+    (res.newAchievements || []).forEach(showAchievementUnlock);
+    if (res.xpGained > 0) showToast(`+${res.xpGained} XP — dars yakunlandi`, 'success');
+    else showToast(res.message || 'Dars yakunlandi', 'info');
+    await loadUserData();
+    updateHeaderUser();
+    if (STATE.view === 'course-detail') renderView(STATE.view);
+    return res;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Navigation
+// ══════════════════════════════════════════════════════════════════════
+const NAV = {
+    student: [
+        {
+            group: 'O‘qish', items: [
+                { view: 'student-dashboard', label: 'Boshqaruv paneli', icon: 'layout-dashboard' },
+                { view: 'courses', label: 'Kurslar', icon: 'book-open' },
+                { view: 'schedule', label: 'Dars jadvali', icon: 'calendar-days' },
+                { view: 'grades', label: 'Baholarim', icon: 'graduation-cap' },
+            ],
+        },
+        {
+            group: 'Jamiyat', items: [
+                { view: 'posts', label: 'Postlar', icon: 'newspaper' },
+                { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
+                { view: 'game', label: 'Mini o‘yin', icon: 'gamepad-2' },
+                { view: 'shop', label: 'Do‘kon', icon: 'shopping-bag' },
+                { view: 'chat', label: 'Guruh chat', icon: 'messages-square' },
+                { view: 'library', label: 'Kutubxona', icon: 'library' },
+            ],
+        },
+        {
+            group: 'Shaxsiy', items: [
+                { view: 'notifications', label: 'Bildirishnomalar', icon: 'bell', badge: true },
+                { view: 'support', label: 'Yordam', icon: 'life-buoy' },
+                { view: 'profile', label: 'Profil', icon: 'user' },
+            ],
+        },
+    ],
+    ustoz: [
+        {
+            group: 'Ta’lim', items: [
+                { view: 'ustoz-dashboard', label: 'Boshqaruv paneli', icon: 'layout-dashboard' },
+                { view: 'courses', label: 'Kurslarim', icon: 'book-open' },
+                { view: 'groups', label: 'Guruhlarim', icon: 'users' },
+                { view: 'attendance', label: 'Davomat', icon: 'user-check' },
+                { view: 'grades', label: 'Baholar', icon: 'graduation-cap' },
+                { view: 'questions', label: 'Savollar', icon: 'list-checks' },
+            ],
+        },
+        {
+            group: 'Kommunikatsiya', items: [
+                { view: 'schedule', label: 'Jadval', icon: 'calendar-days' },
+                { view: 'posts', label: 'Postlar', icon: 'newspaper' },
+                { view: 'game', label: 'Mini o‘yin', icon: 'gamepad-2' },
+                { view: 'staff-chat', label: 'Xodimlar chat', icon: 'messages-square' },
+            ],
+        },
+        {
+            group: 'Shaxsiy', items: [
+                { view: 'notifications', label: 'Bildirishnomalar', icon: 'bell', badge: true },
+                { view: 'support', label: 'Yordam', icon: 'life-buoy' },
+                { view: 'profile', label: 'Profil', icon: 'user' },
+            ],
+        },
+    ],
+    admin: [
+        {
+            group: 'Boshqaruv', items: [
+                { view: 'admin-dashboard', label: 'Panel', icon: 'layout-dashboard' },
+                { view: 'users', label: 'Foydalanuvchilar', icon: 'users' },
+                { view: 'pending', label: 'Tasdiqlash', icon: 'user-check' },
+                { view: 'groups', label: 'Guruhlar', icon: 'users-round' },
+                { view: 'courses', label: 'Kurslar', icon: 'book-open' },
+                { view: 'attendance', label: 'Davomat', icon: 'calendar-check' },
+            ],
+        },
+        {
+            group: 'Monitoring', items: [
+                { view: 'reports', label: 'Hisobotlar', icon: 'bar-chart-3' },
+                { view: 'posts', label: 'Postlar', icon: 'newspaper' },
+                { view: 'questions', label: 'Savollar', icon: 'list-checks' },
+                { view: 'shop', label: 'Do‘kon', icon: 'shopping-bag' },
+                { view: 'support', label: 'Ticketlar', icon: 'life-buoy' },
+                { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
+            ],
+        },
+        {
+            group: 'Tizim', items: [
+                { view: 'staff-chat', label: 'Xodimlar chat', icon: 'messages-square' },
+                { view: 'notifications', label: 'Bildirishnomalar', icon: 'bell', badge: true },
+                { view: 'settings', label: 'Sozlamalar', icon: 'settings' },
+                { view: 'profile', label: 'Profil', icon: 'user' },
+            ],
+        },
+    ],
+    parent: [
+        {
+            group: 'Bolam', items: [
+                { view: 'parent-dashboard', label: 'Boshqaruv paneli', icon: 'layout-dashboard' },
+                { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
+            ],
+        },
+        {
+            group: 'Shaxsiy', items: [
+                { view: 'notifications', label: 'Bildirishnomalar', icon: 'bell', badge: true },
+                { view: 'support', label: 'Yordam', icon: 'life-buoy' },
+                { view: 'profile', label: 'Profil', icon: 'user' },
+            ],
+        },
+    ],
+};
+NAV.tech_admin = NAV.admin;
+NAV.director = [
+    {
+        group: 'Rahbariyat', items: [
+            { view: 'director-dashboard', label: 'Boshqaruv paneli', icon: 'layout-dashboard' },
+            { view: 'reports', label: 'Hisobotlar', icon: 'bar-chart-3' },
+            { view: 'analytics', label: 'Analitika', icon: 'trending-up' },
+        ],
+    },
+    {
+        group: 'Monitoring', items: [
+            { view: 'users', label: 'Xodimlar va talabalar', icon: 'users' },
+            { view: 'pending', label: 'Tasdiqlash', icon: 'user-check' },
+            { view: 'groups', label: 'Guruhlar', icon: 'users-round' },
+            { view: 'attendance', label: 'Davomat', icon: 'calendar-check' },
+            { view: 'shop', label: 'Do‘kon', icon: 'shopping-bag' },
+            { view: 'leaderboard', label: 'Reyting', icon: 'trophy' },
+        ],
+    },
+    {
+        group: 'Shaxsiy', items: [
+        { view: 'notifications', label: 'Bildirishnomalar', icon: 'bell', badge: true },
+        { view: 'support', label: 'Ticketlar', icon: 'life-buoy' },
+        { view: 'profile', label: 'Profil', icon: 'user' },
+    ],
+    },
+];
+
+/** Разделы, доступные роли — для отладки и автотестов */
+window.NAV = NAV;
+window.viewsFor = (role) => (NAV[role] || []).flatMap((g) => g.items.map((i) => i.view));
+
+const MOBILE_NAV = {
+    student: ['student-dashboard', 'courses', 'grades', 'shop', 'profile'],
+    ustoz: ['ustoz-dashboard', 'courses', 'attendance', 'staff-chat', 'profile'],
+    admin: ['admin-dashboard', 'pending', 'users', 'courses', 'profile'],
+    tech_admin: ['admin-dashboard', 'pending', 'users', 'courses', 'profile'],
+    director: ['director-dashboard', 'reports', 'analytics', 'users', 'profile'],
+    parent: ['parent-dashboard', 'leaderboard', 'notifications', 'support', 'profile'],
+};
+
+const DASHBOARD_VIEW = {
+    student: 'student-dashboard',
+    ustoz: 'ustoz-dashboard',
+    admin: 'admin-dashboard',
+    tech_admin: 'admin-dashboard',
+    director: 'director-dashboard',
+    parent: 'parent-dashboard',
+};
+
+const VIEW_TITLES = {
+    home: "O’quv.uz", login: 'Kirish', register: 'Ro‘yxatdan o‘tish',
+    'student-dashboard': 'Boshqaruv paneli', 'ustoz-dashboard': 'Boshqaruv paneli',
+    'admin-dashboard': 'Boshqaruv paneli', 'director-dashboard': 'Boshqaruv paneli',
+    'parent-dashboard': 'Boshqaruv paneli',
+    courses: 'Kurslar', 'course-detail': 'Kurs', users: 'Foydalanuvchilar',
+    groups: 'Guruhlar', attendance: 'Davomat', grades: 'Baholar',
+    reports: 'Hisobotlar', analytics: 'Analitika', leaderboard: 'Reyting',
+    support: 'Yordam', chat: 'Guruh chat', 'staff-chat': 'Xodimlar chat',
+    library: 'Kutubxona', game: 'Mini o’yin', questions: 'Savollar',
+    schedule: 'Jadval', posts: 'Postlar', profile: 'Profil',
+    notifications: 'Bildirishnomalar', settings: 'Sozlamalar',
+// Yangi bo'limlar VIEW_TITLES da bo'lmasa, renderView ularni topa olmaydi
+// va har doim boshqaruv paneliga qaytadi (jimjin o'zgarish kuzatilmaydi).
+shop: 'Do\\u2018kon', pending: 'Tasdiqlash', homework: 'Uy vazifalari',
+};
+
+const ALL_VIEWS = new Set(Object.keys(VIEW_TITLES));
+const PUBLIC_VIEWS = new Set(['home', 'login', 'register']);
+
+// ══════════════════════════════════════════════════════════════════════
+//  Shell rendering
+// ══════════════════════════════════════════════════════════════════════
+function findNavItem(view) {
+    const groups = NAV[STATE.user?.role] || [];
+    for (const g of groups) {
+        const found = g.items.find(i => i.view === view);
+        if (found) return found;
+    }
+    return null;
+}
 
 function renderSidebar() {
-    if (!STATE.user) return;
-    const db = getDB();
-    document.getElementById('sidebar-name').innerText = STATE.user.ism;
-    const r = STATE.user.role;
-    const roleLabel = t(r) || r.replace('_',' ').toUpperCase();
-    document.getElementById('sidebar-role').innerText = roleLabel.toUpperCase();
-    const avatarTxt = STATE.user.avatar ? `<img src="${STATE.user.avatar}" class="w-full h-full object-cover rounded-[14px]">` : STATE.user.ism[0].toUpperCase();
-    document.getElementById('sidebar-avatar').innerHTML = avatarTxt;
+    const menu = document.getElementById('nav-menu');
+    if (!menu) return;
+    const groups = NAV[STATE.user?.role] || [];
+    const view = STATE.view;
 
-    // Today's date display
-    const todayStr = new Date().toLocaleDateString('uz-UZ', { weekday: 'long', day: 'numeric', month: 'long' });
+    menu.innerHTML = groups.map(g => `
+        <div class="sb-section">${esc(g.group)}</div>
+        ${g.items.map(i => `
+            <a class="nav-link ${view === i.view || (view === 'course-detail' && i.view === 'courses') ? 'active' : ''}"
+               href="#${i.view}" data-nav="${i.view}">
+                <i data-lucide="${i.icon}"></i>
+                <span class="grow truncate">${esc(i.label)}</span>
+                ${i.badge ? '<span class="notif-badge hidden" data-notif-badge>0</span>' : ''}
+            </a>`).join('')}
+    `).join('');
 
-    const links = [
-        { id: `${r}-dashboard`, icon: 'layout-dashboard', label: t('dashboard') },
-        { id: 'courses', icon: 'book', label: t('courses') },
-        { id: 'posts', icon: 'message-square', label: t('posts') },
-        { id: 'support', icon: 'help-circle', label: t('support') },
-        { id: 'profile', icon: 'user', label: t('profile') }
-    ];
-    if (STATE.user.groupId) {
-        links.splice(3, 0, { id: 'chat', icon: 'messages-square', label: t('chat') });
-    }
-    
-    const unreadNotifs = (db.notifications || []).filter(n => !n.seen && (
-        r === 'admin' || 
-        (r === 'ustoz' && n.msg.includes(STATE.user.ism)) ||
-        (r === 'student' && n.userId === STATE.user.id)
-    )).length;
-    
-    links.splice(1, 0, { id: 'notifications', icon: 'bell', label: t('notifications'), badge: unreadNotifs });
-    if (['admin', 'tech_admin', 'director', 'ustoz'].includes(r)) {
-        links.push({ id: 'staff-chat', icon: 'message-circle', label: "Jamoa Chati" });
-    }
-    if (r === 'admin' || r === 'tech_admin') {
-        links.push({ id: 'users', icon: 'users', label: t('users') });
-        links.push({ id: 'groups', icon: 'database', label: t('groups') });
-        links.push({ id: 'questions_mgmt', icon: 'list-checks', label: t('questions') });
-    }
-    if (r === 'student') {
-        links.push({ id: 'leaderboard', icon: 'trophy', label: t('leaderboard') });
-        links.push({ id: 'library', icon: 'library', label: t('library') });
-        links.push({ id: 'duel', icon: 'zap', label: t('duel') });
-        links.push({ id: 'game', icon: 'gamepad-2', label: t('game') });
-        links.push({ id: 'attendance', icon: 'calendar-check', label: t('attendance') });
-    }
-    if (r === 'ustoz') {
-        links.splice(1, 0, { id: 'library', icon: 'library', label: t('library') });
-        links.push({ id: 'groups', icon: 'users', label: t('groups') });
-        links.push({ id: 'schedule', icon: 'calendar', label: t('schedule') });
-    }
-    if (['director', 'ustoz', 'admin'].includes(r)) {
-        links.push({ id: 'analytics', icon: 'bar-chart-3', label: t('analytics') });
-    }
-
-    // Lang toggle
-    const langToggleHTML = ``;
-    CURRENT_LANG = 'uz';
-
-    // Date display
-    const dateHTML = `<div class="mx-2 mb-2 px-3 py-2 bg-indigo-50 rounded-xl flex items-center gap-2">
-        <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-400 shrink-0"></i>
-        <span class="text-[10px] font-black text-indigo-600 capitalize">${todayStr}</span>
-    </div>`;
-
-    document.getElementById('nav-menu').innerHTML = 
-        dateHTML +
-        langToggleHTML +
-        links.map(l =>
-        `<a href="#${l.id}" class="nav-link ${STATE.view === l.id ? 'active' : ''} relative">
-            <i data-lucide="${l.icon}" class="w-5 mr-3"></i>
-            ${l.label}
-            ${l.badge ? `<span class="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse shadow-md border border-white">${l.badge}</span>` : ''}
-        </a>`
-    ).join('') + `<div class="mt-8 pt-4"><a href="#" onclick="logout()" class="nav-link text-red-500 hover:text-red-600"><i data-lucide="log-out" class="w-5 mr-3"></i>${t('logout')}</a></div>`;
-    
-    const mBtn = document.getElementById('mobile-menu-btn');
-    if (mBtn) {
-        mBtn.className = 'relative p-2 bg-white border border-slate-200 shadow-sm rounded-xl text-slate-600 hover:text-indigo-600 transition-all active:scale-95';
-        mBtn.innerHTML = `<i data-lucide="menu" class="w-6 h-6"></i>${unreadNotifs > 0 ? '<span class="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 border-2 border-white rounded-full animate-bounce"></span>' : ''}`;
-        safeLucide(mBtn);
-    }
-    
-    safeLucide(document.getElementById('sidebar-container'));
+    updateHeaderUser();
+    safeLucide(menu);
 }
 
-function logout() { STATE.user = null; localStorage.removeItem('lms_user'); window.location.hash = 'login'; }
+function renderMobileNav() {
+    const nav = document.getElementById('mobile-bottom-nav');
+    if (!nav || !STATE.user) return;
 
-function setupInteractions() {
-    document.addEventListener('click', e => {
-        const link = e.target.closest('[data-link]');
-        if (link) { e.preventDefault(); window.location.hash = link.getAttribute('data-link'); }
-    });
+    const views = MOBILE_NAV[STATE.user.role] || [];
+    const all = (NAV[STATE.user.role] || []).flatMap(g => g.items);
+    const view = STATE.view;
 
-    const login = document.getElementById('form-login');
-    if (login) login.onsubmit = e => {
-        e.preventDefault();
-        const em = document.getElementById('log-email').value, pw = document.getElementById('log-pass').value;
-        const u = getDB().users.find(x => x.email === em && x.password === pw);
-        if (u) { 
-            STATE.user = u; 
-            localStorage.setItem('lms_user', JSON.stringify(u)); 
-            notifyAdmin(`Yangi foydalanuvchi tizimga kirdi: ${u.ism} (${u.role})`);
-            window.location.hash = `${u.role}-dashboard`; 
-            login.reset(); 
-        }
-        else document.getElementById('login-error-card').classList.remove('hidden');
-    };
+    nav.innerHTML = views.map((v) => {
+        const item = all.find(i => i.view === v) || { label: v, icon: 'circle' };
+        const active = view === v || (view === 'course-detail' && v === 'courses');
+        return `
+            <a href="#${v}" class="${active ? 'active' : ''}">
+                <i data-lucide="${item.icon}"></i>
+                <span>${esc(item.label)}</span>
+                ${item.badge ? '<span class="notif-badge hidden" data-notif-badge>0</span>' : ''}
+            </a>`;
+    }).join('');
 
-    const reg = document.getElementById('form-register');
-    if (reg) reg.onsubmit = e => {
-        try {
-            e.preventDefault();
-            let db = getDB();
-            const nameEl = document.getElementById('reg-name'),
-                  emailEl = document.getElementById('reg-email'),
-                  passEl = document.getElementById('reg-pass'),
-                  groupEl = document.getElementById('reg-group');
-
-            if (!nameEl || !emailEl || !passEl) throw new Error("Input element missing");
-            
-            const name = nameEl.value.trim(),
-                  em = emailEl.value.trim(),
-                  pw = passEl.value.trim(),
-                  gId = groupEl ? groupEl.value : "";
-            
-            if (!name || !em || pw.length < 6) {
-                const msg = "Barcha maydonlarni to'g'ri to'ldiring (parol kamida 6 belgi)";
-                document.getElementById('reg-error-msg').innerText = msg;
-                document.getElementById('reg-error-card').classList.remove('hidden'); 
-                return;
-            }
-
-            if (db.users.find(x => x.email === em)) {
-                document.getElementById('reg-error-msg').innerText = "Bu email bilan allaqachon ro'yxatdan o'tilgan";
-                document.getElementById('reg-error-card').classList.remove('hidden'); 
-                return;
-            }
-            
-            const nu = { 
-                id: Date.now(), ism: name, email: em, password: pw, role: 'student', 
-                points: 0, groupId: gId ? parseInt(gId) : null, avatar: null, achievements: [], progress: {}
-            };
-            
-            db.users.push(nu);
-            if (nu.groupId) {
-                const group = db.groups.find(g => g.id === nu.groupId);
-                if (group) {
-                    group.studentIds = group.studentIds || [];
-                    group.studentIds.push(nu.id);
-                }
-            }
-            
-            saveDB(db); 
-            STATE.user = nu; 
-            localStorage.setItem('lms_user', JSON.stringify(nu)); 
-            notifyAdmin(`Yangi foydalanuvchi ro'yxatdan o'tdi: ${nu.ism} (${nu.role})`);
-            
-            showToast("Muvaffaqiyatli ro'yxatdan o'tdingiz!");
-            window.location.hash = 'student-dashboard'; 
-            reg.reset();
-        } catch (err) {
-            console.error("Reg error:", err);
-            showToast("Hatolik yuz berdi. Iltimos sahifani yangilang.", "error");
-        }
-    };
-
-    // Global Ripple Effect
-    document.addEventListener('mousedown', e => {
-        const target = e.target.closest('.btn-interactive, .glass-card, .bottom-nav-item');
-        if (target) {
-            const rect = target.getBoundingClientRect();
-            const ripple = document.createElement('span');
-            ripple.className = 'ripple';
-            const size = Math.max(rect.width, rect.height) * 2;
-            ripple.style.width = ripple.style.height = `${size}px`;
-            ripple.style.left = `${e.clientX - rect.left - size / 2}px`;
-            ripple.style.top = `${e.clientY - rect.top - size / 2}px`;
-            target.classList.add('ripple-container');
-            target.appendChild(ripple);
-            setTimeout(() => { ripple.remove(); if (target.querySelectorAll('.ripple').length === 0) target.classList.remove('ripple-container'); }, 600);
-        }
-    });
-
-    // Global Tap Animation - Handled by CSS :active for better performance
-
-    document.getElementById('mobile-menu-btn').onclick = () => {
-        document.getElementById('sidebar-container').classList.toggle('-translate-x-full');
-    };
-
-    // Auto-close sidebar on mobile after clicking a nav link
-    document.getElementById('nav-menu').addEventListener('click', e => {
-        if (e.target.closest('a') && window.innerWidth < 1024) {
-            document.getElementById('sidebar-container').classList.add('-translate-x-full');
-        }
-    });
+    nav.classList.remove('hidden');
+    safeLucide(nav);
 }
 
-function renderView(view) {
-    if (view === 'home') { 
-        const lc = document.getElementById('landing-content'); 
-        if (lc) { lc.innerHTML = v_home(); safeLucide(lc); } 
-        return; 
-    }
-    const a = document.getElementById('dynamic-view-area');
-    a.innerHTML = ''; 
-    a.className = window.innerWidth < 1024 ? 'view-slide-in' : 'animate-fade';
-    // Stop lesson timer when navigating away from lesson
-    if (view !== 'course-detail') stopLessonTimer();
-    const m = { 
-        'student-dashboard': d_student, 
-        'ustoz-dashboard': d_ustoz, 
-        'admin-dashboard': d_admin, 
-        'tech_admin-dashboard': d_tech_admin,
-        'director-dashboard': d_director,
-        'courses': v_courses, 
-        'course-detail': v_cdetail, 
-        'posts': v_posts, 
-        'profile': v_profile, 
-        'leaderboard': v_lead, 
-        'support': v_sup, 
-        'users': v_users,
-        'groups': v_groups,
-        'attendance': v_attendance,
-        'reports': v_reports,
-        'chat': v_chat,
-        'notifications': v_notifications,
-        'library': v_library,
-        'duel': v_duel,
-        'game': v_game,
-        'analytics': d_director,
-        'questions_mgmt': v_questions_mgmt,
-        'staff-chat': v_staff_chat,
-        'schedule': v_schedule, 'home': v_home
-    };
-    if (m[view]) a.innerHTML = m[view]();
-    else a.innerHTML = `<div class="text-center py-20"><i data-lucide="search-x" class="w-16 h-16 text-slate-300 mx-auto mb-4"></i><h2 class="text-2xl font-black text-slate-800">Sahifa topilmadi</h2></div>`;
-    safeLucide(a);
-}
-
-// ======================== DASHBOARDS ========================
-// Dashboard placeholder
-
-const d_ustoz = () => {
-    const db = getDB();
-    const myGroups = db.groups.filter(g => g.ustozId === STATE.user.id);
-    const todayDayIndex = (new Date().getDay() + 6) % 7; // 0=Mon...5=Sat
-    const dayNames = ['Dushanba','Seshanba','Chorshanba','Payshanba','Juma','Shanba','Yakshanba'];
-    const todayName = dayNames[todayDayIndex];
-
-    // Today's schedule from all my groups
-    const todaySlots = [];
-    myGroups.forEach(g => {
-        (g.schedule || []).filter(s => s.dayIndex === todayDayIndex).forEach(s => {
-            todaySlots.push({ ...s, groupName: g.name });
-        });
-    });
-    todaySlots.sort((a, b) => a.time.localeCompare(b.time));
-
-    return `
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-        <div>
-            <h1 class="text-3xl font-black text-slate-800">${t('dashboard')}</h1>
-            <p class="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">${todayName} — ${new Date().toLocaleDateString('uz-UZ',{day:'numeric',month:'long',year:'numeric'})}</p>
-        </div>
-        <div class="flex gap-3 flex-wrap">
-            <button onclick="renderView('schedule')" class="bg-indigo-50 text-indigo-600 px-5 py-3 rounded-2xl font-bold border border-indigo-100 btn-interactive flex items-center gap-2"><i data-lucide="calendar" class="w-4 h-4"></i> Jadval</button>
-            <button onclick="window.location.hash='groups'" class="bg-slate-50 text-slate-600 px-5 py-3 rounded-2xl font-bold border border-slate-100 btn-interactive flex items-center gap-2"><i data-lucide="users" class="w-4 h-4"></i> Guruhlar</button>
-            <button onclick="oModal('add-course')" class="bg-indigo-600 text-white px-5 py-3 rounded-2xl font-bold shadow-lg shadow-indigo-600/30 btn-interactive flex items-center gap-2"><i data-lucide="plus" class="w-4 h-4"></i> Yangi Kurs</button>
-        </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div class="lg:col-span-2 space-y-8">
-
-            <!-- TODAY'S SCHEDULE -->
-            <div class="glass-card p-8 rounded-[2.5rem] bg-gradient-to-br from-indigo-50 to-white border-2 border-indigo-100">
-                <h2 class="text-xl font-black mb-5 flex items-center gap-2">
-                    <i data-lucide="clock" class="text-indigo-600 w-5 h-5"></i>
-                    ${'Bugungi darslar'}
-                    <span class="ml-auto text-xs font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-xl">${todayName}</span>
-                </h2>
-                <div class="space-y-3">
-                ${todaySlots.length === 0 ? `
-                    <div class="text-center py-8">
-                        <p class="text-slate-400 font-bold">${'Bugun dars yo\'q'}</p>
-                        <button onclick="renderView('schedule')" class="mt-3 text-indigo-600 font-black text-sm hover:underline">+ Jadval qo'shish</button>
-                    </div>` :
-                    todaySlots.map(sl => `
-                    <div class="flex items-center gap-4 p-4 bg-white rounded-2xl border border-indigo-50 shadow-sm">
-                        <div class="w-14 h-14 bg-indigo-600 text-white rounded-2xl flex flex-col items-center justify-center font-black shadow-lg shadow-indigo-600/20">
-                            <span class="text-lg leading-none">${sl.time.split(':')[0]}</span>
-                            <span class="text-[10px] opacity-70">${sl.time.split(':')[1]}</span>
-                        </div>
-                        <div class="flex-1">
-                            <p class="font-black text-slate-800">${sl.subject}</p>
-                            <p class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">${sl.groupName}</p>
-                        </div>
-                        <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-                    </div>`).join('')}
-                </div>
-            </div>
-
-            <!-- GROUPS -->
-            <div class="glass-card p-8 rounded-[2.5rem]">
-                <h2 class="text-xl font-black mb-6 flex items-center gap-2"><i data-lucide="users" class="text-indigo-600"></i> Faol Guruhlarim</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    ${myGroups.map(g => `
-                        <div class="p-5 bg-slate-50 border border-slate-100 rounded-2xl cursor-pointer hover:border-indigo-300 transition-all group" onclick="viewGroupAttendance(${g.id})">
-                            <div class="flex justify-between items-start mb-3">
-                                <div>
-                                    <span class="text-[10px] font-black uppercase text-indigo-500">${g.studentIds.length} O'quvchi</span>
-                                    <h4 class="font-black text-slate-800 text-lg">${g.name}</h4>
-                                </div>
-                                <div class="flex gap-2">
-                                    <button onclick="event.stopPropagation(); STATE.user.groupId=${g.id}; window.location.hash='chat';" class="p-2 bg-white text-indigo-500 rounded-xl shadow-sm border border-slate-100 hover:bg-indigo-600 hover:text-white transition-all" title="Chat">
-                                        <i data-lucide="message-square" class="w-4 h-4"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <!-- Group mini-schedule -->
-                            ${(g.schedule||[]).filter(s=>s.dayIndex===todayDayIndex).length > 0 ? `
-                            <div class="flex gap-2 flex-wrap">
-                                ${(g.schedule||[]).filter(s=>s.dayIndex===todayDayIndex).map(s=>`
-                                <span class="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black">${s.time} ${s.subject}</span>`).join('')}
-                            </div>` : ''}
-                        </div>
-                    `).join('')}
-                    ${myGroups.length === 0 ? '<p class="text-slate-400 font-bold col-span-2">Hozircha guruhlaringiz yo\'q.</p>' : ''}
-                </div>
-            </div>
-
-            <!-- COURSES -->
-            <div class="glass-card p-8 rounded-[2.5rem]">
-                <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-xl font-black flex items-center gap-2"><i data-lucide="layers" class="text-indigo-600"></i> Kurslarim</h2>
-                    <button onclick="oModal('add-course')" class="text-xs font-black text-indigo-600 hover:underline">+ Yangi kurs</button>
-                </div>
-                <div class="space-y-3">
-                    ${db.courses.filter(c => c.authorId === STATE.user.id || c.teacherId === STATE.user.id).map(c => `
-                        <div class="p-5 bg-white border border-slate-100 rounded-2xl flex justify-between items-center hover:shadow-xl hover:border-indigo-100 transition-all cursor-pointer group" onclick="opCourse(${c.id})">
-                            <div class="flex items-center gap-4">
-                                <div class="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors"><i data-lucide="book-open"></i></div>
-                                <div>
-                                    <span class="font-extrabold text-slate-800 block">${c.title}</span>
-                                    <span class="text-[10px] text-slate-400 font-bold">${(c.lessons||[]).length} dars</span>
-                                </div>
-                            </div>
-                            <i data-lucide="arrow-right" class="text-slate-300 group-hover:text-indigo-600 transition-all group-hover:translate-x-1"></i>
-                        </div>
-                    `).join('')}
-                    ${db.courses.filter(c => c.authorId === STATE.user.id || c.teacherId === STATE.user.id).length === 0 ? '<p class="text-slate-400 font-bold text-sm">Hali kurs yaratilmagan</p>' : ''}
-                </div>
-            </div>
-        </div>
-
-        <div class="space-y-6">
-            <!-- Quick Post -->
-            <div class="glass-card p-8 rounded-[2.5rem] h-fit sticky top-8">
-                <h2 class="text-xl font-black mb-4">Yangi Post</h2>
-                <p class="text-sm text-slate-500 mb-6 font-medium">O'quvchilarga e'lon qoldirish.</p>
-                <button onclick="oModal('add-post')" class="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-2"><i data-lucide="edit" class="w-5 h-5"></i> Post yozish</button>
-            </div>
-
-            <!-- Weekly schedule summary for sidebar -->
-            <div class="glass-card p-6 rounded-[2.5rem]">
-                <h3 class="font-black text-slate-800 mb-4 flex items-center gap-2 text-base">
-                    <i data-lucide="calendar" class="text-indigo-600 w-4 h-4"></i> Hafta jadvali
-                    <button onclick="renderView('schedule')" class="ml-auto text-[10px] font-black text-indigo-600 hover:underline uppercase tracking-widest">Tahrirlash →</button>
-                </h3>
-                <div class="space-y-2">
-                ${['Dushanba','Seshanba','Chorshanba','Payshanba','Juma','Shanba'].map((day,di) => {
-                    const slots = [];
-                    myGroups.forEach(g => (g.schedule||[]).filter(s=>s.dayIndex===di).forEach(s=>slots.push(s)));
-                    return slots.length > 0 ? `
-                    <div class="flex items-start gap-3">
-                        <span class="text-[10px] font-black text-slate-400 uppercase w-20 pt-0.5 shrink-0">${day.slice(0,3)}</span>
-                        <div class="flex flex-wrap gap-1 flex-1">
-                            ${slots.map(s=>`<span class="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[10px] font-black">${s.time}</span>`).join('')}
-                        </div>
-                    </div>` : '';
-                }).filter(Boolean).join('') || '<p class="text-slate-300 font-bold text-xs">Jadval kiritilmagan</p>'}
-                </div>
-            </div>
-        </div>
-    </div>`;
-};
-
-const d_admin = () => {
-    const psts = getDB().posts.filter(p => !p.approved);
-    const tkts = getDB().tickets.filter(t => t.status === 'Ochiq');
-    return `
-    <div class="flex justify-between items-center mb-8"><h1 class="text-3xl font-black text-slate-800">Admin Boshqaruvi</h1><button onclick="oLandingEdit()" class="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg shadow-indigo-600/20 btn-interactive flex items-center gap-2"><i data-lucide="layout"></i> Landingni Tahrirlash</button></div>
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div class="glass-card p-8 rounded-[2.5rem]">
-            <h2 class="font-black text-xl mb-6 text-amber-600 flex items-center gap-2"><i data-lucide="clock"></i> Kutish ro'yxati</h2>
-            ${psts.length === 0 ? '<p class="text-slate-400 font-bold">Hech narsa yo`q.</p>' : psts.map(p => `
-                <div class="p-5 bg-amber-50/30 border border-amber-100 rounded-2xl mb-4 flex justify-between items-center">
-                    <p class="font-bold text-slate-700 line-clamp-2 pr-4">${p.text}</p>
-                    <div class="flex gap-2 shrink-0">
-                        <button onclick="apprPost(${p.id},true)" class="p-3 bg-emerald-500 text-white rounded-xl shadow-lg shadow-emerald-500/20 hover:scale-110 transition"><i data-lucide="check" class="w-5 h-5"></i></button>
-                        <button onclick="apprPost(${p.id},false)" class="p-3 bg-red-500 text-white rounded-xl shadow-lg shadow-red-500/20 hover:scale-110 transition"><i data-lucide="trash" class="w-5 h-5"></i></button>
-                    </div>
-                </div>`).join('')}
-        </div>
-        <div class="glass-card p-8 rounded-[2.5rem]">
-            <h2 class="font-black text-xl mb-6 text-indigo-600 flex items-center gap-2"><i data-lucide="help-circle"></i> Ochiq Ticketlar</h2>
-            ${tkts.length === 0 ? '<p class="text-slate-400 font-bold">Hozircha ticketlar yo`q.</p>' : tkts.map(t => `
-                <div class="p-5 bg-white border border-slate-100 rounded-2xl mb-4 cursor-pointer hover:shadow-xl transition-all" onclick="oModal('view-tkt', ${t.id})">
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="font-black text-slate-800">#${t.id}</span>
-                        <span class="text-[10px] font-black uppercase text-indigo-500 tracking-tighter">${t.user_name}</span>
-                    </div>
-                    <p class="text-sm font-medium text-slate-500 line-clamp-1">${t.message}</p>
-                </div>`).join('')}
-        </div>
-    </div>`;
-}
-
-const d_tech_admin = () => {
-    const db = getDB();
-    return `
-    <h1 class="text-3xl font-black text-slate-800 mb-8">Texnik Admin</h1>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div class="glass-card p-8 rounded-[2.5rem] lg:col-span-2">
-            <h2 class="text-xl font-black mb-6">Tizim Sozlamalari</h2>
-            <div class="space-y-6">
-                <div>
-                    <label class="block text-sm font-black text-slate-500 uppercase mb-2">Platforma Nomi</label>
-                    <input id="sys-name" type="text" value="${db.settings.platformName}" class="w-full bg-slate-50 border border-slate-200 p-4 rounded-2xl font-bold">
-                </div>
-                <div class="flex items-center justify-between p-4 bg-slate-50 rounded-2xl">
-                    <div>
-                        <p class="font-black text-slate-800">Registratsiya</p>
-                        <p class="text-xs text-slate-500 font-bold">Yangi foydalanuvchilar qo'shilishi</p>
-                    </div>
-                    <button onclick="toggleSetting('allowRegistration')" class="w-14 h-8 bg-${db.settings.allowRegistration ? 'indigo-600' : 'slate-300'} rounded-full relative transition-colors">
-                        <div class="absolute top-1 left-1 bg-white w-6 h-6 rounded-full transition-transform transform ${db.settings.allowRegistration ? 'translate-x-6' : ''}"></div>
-                    </button>
-                </div>
-                <button onclick="saveSettings()" class="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl shadow-indigo-600/20">Saqlash</button>
-            </div>
-        </div>
-        <div class="glass-card p-8 rounded-[2.5rem]">
-            <h2 class="text-xl font-black mb-4">Rol Boshqaruvi</h2>
-            <p class="text-sm text-slate-500 font-medium mb-6">Foydalanuvchilar ro'yxatidan rollarni o'zgartiring.</p>
-            <button onclick="window.location.hash='users'" class="w-full border-2 border-slate-200 py-4 rounded-2xl font-black hover:bg-slate-50 transition-all">Foydalanuvchilarga o'tish</button>
-        </div>
-    </div>`;
-};
-
-const d_director = (selectedDate = null) => {
-    const db = getDB();
-    const students = db.users.filter(u => u.role === 'student');
-    const ustozlar = db.users.filter(u => u.role === 'ustoz' || u.role === 'director' || u.role === 'admin');
-    const avgScore = Math.round(students.reduce((acc, s) => acc + (s.points || 0), 0) / (students.length || 1));
-    const totalCourses = db.courses.length;
-
-    // Get all attendance dates
-    const allDates = [...new Set((db.attendance || []).map(a => a.date))].sort().reverse();
-    const activeDate = selectedDate || allDates[0] || new Date().toISOString().split('T')[0];
-
-    // Attendance for selected date
-    const dayRecords = (db.attendance || []).filter(a => a.date === activeDate);
-    
-    return `
-    <div class="space-y-8 animate-fade">
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-2">
-        <h1 class="text-3xl font-black text-slate-800">${t('analytics')}</h1>
-        <div class="flex items-center gap-3 bg-indigo-50 border border-indigo-100 px-4 py-2 rounded-2xl">
-            <i data-lucide="calendar" class="w-4 h-4 text-indigo-500"></i>
-            <span class="text-xs font-black text-indigo-700">${new Date().toLocaleDateString('uz-UZ', {weekday:'long', day:'numeric', month:'long', year:'numeric'})}</span>
-        </div>
-    </div>
-
-    <!-- Staff Photos Row (Director/Admin/Ustoz) -->
-    <div class="glass-card p-6 rounded-[2.5rem] bg-white">
-        <h2 class="text-lg font-black mb-5 flex items-center gap-2"><i data-lucide="shield" class="text-indigo-600 w-5 h-5"></i> ${'Xodimlar'}</h2>
-        <div class="flex flex-wrap gap-4">
-            ${ustozlar.map(u => `
-            <div class="flex flex-col items-center gap-2 cursor-pointer group" title="${u.email}">
-                <div class="w-16 h-16 rounded-[1.2rem] overflow-hidden border-2 border-slate-100 group-hover:border-indigo-400 transition-all shadow-sm bg-gradient-to-br from-indigo-50 to-slate-50 flex items-center justify-center font-black text-indigo-600 text-xl">
-                    ${u.avatar ? `<img src="${u.avatar}" class="w-full h-full object-cover">` : u.ism[0]}
-                </div>
-                <span class="text-[10px] font-black text-slate-600 text-center max-w-[70px] leading-tight truncate">${u.ism.split(' ')[0]}</span>
-                <span class="text-[9px] font-black px-2 py-0.5 rounded-full ${ 
-                    u.role==='director'?'bg-purple-100 text-purple-600':u.role==='admin'?'bg-red-100 text-red-600':'bg-indigo-100 text-indigo-600'
-                }">${t(u.role)}</span>
-            </div>`).join('')}
-        </div>
-    </div>
-
-    <!-- Stats Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="glass-card p-6 rounded-[2rem] bg-indigo-600 text-white shadow-xl shadow-indigo-600/30">
-            <p class="text-indigo-100 font-bold text-xs uppercase">${"O'quvchilar"}</p>
-            <h3 class="text-4xl font-black mt-1">${students.length}</h3>
-        </div>
-        <div class="glass-card p-6 rounded-[2rem] bg-white border border-slate-100">
-            <p class="text-slate-400 font-bold text-xs uppercase">${"O'rtacha Ball"}</p>
-            <h3 class="text-4xl font-black mt-1 text-slate-800">${avgScore}</h3>
-        </div>
-        <div class="glass-card p-6 rounded-[2rem] bg-white border border-slate-100">
-            <p class="text-slate-400 font-bold text-xs uppercase">${'Kurslar'}</p>
-            <h3 class="text-4xl font-black mt-1 text-slate-800">${totalCourses}</h3>
-        </div>
-        <div class="glass-card p-6 rounded-[2rem] bg-white border border-slate-100">
-            <p class="text-slate-400 font-bold text-xs uppercase">${'Ticketlar'}</p>
-            <h3 class="text-4xl font-black mt-1 text-amber-500">${db.tickets.filter(tc => tc.status === 'Ochiq').length}</h3>
-        </div>
-    </div>
-
-    <!-- Date-based Attendance Drilldown -->
-    <div class="glass-card p-8 rounded-[2.5rem] bg-white shadow-premium">
-        <h2 class="text-xl font-black mb-6 flex items-center gap-2"><i data-lucide="calendar-check" class="text-emerald-500"></i> ${'Sanaga ko\'ra davomat'}</h2>
-        <!-- Date selector -->
-        <div class="flex flex-wrap gap-2 mb-8">
-            ${allDates.slice(0,14).map(d => `
-            <button onclick="document.getElementById('dynamic-view-area').innerHTML=d_director('${d}'); safeLucide(document.getElementById('dynamic-view-area'))" 
-                class="px-4 py-2 rounded-xl text-xs font-black transition-all ${ d===activeDate ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 border border-slate-100'}">  
-                ${new Date(d).toLocaleDateString('uz-UZ',{day:'numeric',month:'short'})}
-            </button>`).join('')}
-            ${allDates.length === 0 ? `<span class="text-slate-400 font-bold text-sm">${'Ma\'lumot yo\'q'}</span>` : ''}
-        </div>
-        <!-- Attendance table for selected date -->
-        <div class="overflow-x-auto">
-        <table class="w-full text-left">
-            <thead><tr class="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50">
-                <th class="pb-4">${'Talaba'}</th>
-                <th class="pb-4">${'Guruh'}</th>
-                <th class="pb-4 text-center">${'XP'}</th>
-                <th class="pb-4 text-center">${'Holat'}</th>
-            </tr></thead>
-            <tbody class="divide-y divide-slate-50">
-            ${students.map(s => {
-                const g = (db.groups||[]).find(x => x.id === s.groupId);
-                const dayRec = dayRecords.find(r => r.groupId === s.groupId);
-                const status = dayRec ? dayRec.records[s.id] : null;
-                const statusBadge = status === 'present'
-                    ? `<span class="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black">${t('present')}</span>`
-                    : status === 'absent'
-                    ? `<span class="px-3 py-1 bg-red-100 text-red-600 rounded-lg text-[10px] font-black">${t('absent')}</span>`
-                    : `<span class="px-3 py-1 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-black">—</span>`;
-                return `<tr class="hover:bg-indigo-50/30 transition">
-                    <td class="py-4">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center font-black text-indigo-600 border border-slate-100">
-                                ${s.avatar ? `<img src="${s.avatar}" class="w-full h-full object-cover rounded-xl">` : s.ism[0]}
-                            </div>
-                            <div>
-                                <p class="font-bold text-slate-800 text-sm">${s.ism}</p>
-                                <p class="text-[10px] font-bold text-indigo-500">${s.points} XP</p>
-                            </div>
-                        </div>
-                    </td>
-                    <td class="py-4 text-sm font-bold text-slate-500">${g ? g.name : '—'}</td>
-                    <td class="py-4 text-center">
-                        <div class="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden mx-auto">
-                            <div class="h-full bg-indigo-500 rounded-full" style="width:${Math.min(s.points/20,100)}%"></div>
-                        </div>
-                    </td>
-                    <td class="py-4 text-center">${statusBadge}</td>
-                </tr>`;
-            }).join('')}
-            </tbody>
-        </table>
-        </div>
-    </div>
-    </div>`;
-};
-window.d_director = d_director;
-
-window.apprPost = async (id, st) => {
-    let db = getDB();
-    if (st) {
-        let p = db.posts.find(x => x.id === id);
-        if (p) {
-            p.approved = true;
-            p.status = 'approved';
-        }
-        try {
-            await fetch(`${API_BASE}/posts/${id}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ approved: true })
-            });
-        } catch (e) { console.error(e); }
-    } else {
-        db.posts = db.posts.filter(x => x.id !== id);
-        try {
-            await fetch(`${API_BASE}/posts/${id}`, { method: 'DELETE' });
-        } catch (e) { console.error(e); }
-    }
-    saveDB(db);
-    showToast('Natija saqlandi');
-    renderView('admin-dashboard');
-    syncBackend(); syncLandingData();
-}
-window.toggleSetting = (key) => { let db = getDB(); db.settings[key] = !db.settings[key]; saveDB(db); renderView('tech_admin-dashboard'); }
-window.saveSettings = () => { let db = getDB(); db.settings.platformName = document.getElementById('sys-name').value; saveDB(db); showToast('Xizmat sozlamalari saqlandi'); }
-
-const v_profile = () => {
-    const db = getDB();
-    const achievements = db.achievements.map(a => {
-        const unlocked = (STATE.user.achievements || []).includes(a.id);
-        return { ...a, unlocked };
-    });
-    const stats = getUserStats(STATE.user);
-
-    return `
-    <div class="max-w-6xl mx-auto mt-10">
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            <div class="lg:col-span-1 border-r border-slate-100 pr-8">
-                <div class="premium-card rounded-[2.5rem] p-8 text-center bg-white border-slate-100 shadow-premium">
-                    <div class="relative w-32 h-32 mx-auto mb-6 group">
-                        <div class="w-full h-full rounded-[2.5rem] bg-gradient-to-tr from-indigo-500 to-purple-600 text-white flex items-center justify-center text-4xl font-black shadow-2xl overflow-hidden avatar-preview">
-                            ${STATE.user.avatar ? `<img src="${STATE.user.avatar}" class="w-full h-full object-cover">` : STATE.user.ism[0].toUpperCase()}
-                        </div>
-                        <label class="absolute -bottom-2 -right-2 bg-indigo-600 p-3 rounded-2xl shadow-xl border-4 border-white cursor-pointer hover:scale-110 transition active:scale-95 z-10">
-                            <i data-lucide="camera" class="w-5 h-5 text-white"></i>
-                            <input type="file" class="hidden" accept="image/*" onchange="uploadAvatar(this)">
-                        </label>
-                    </div>
-                    
-                    <div class="mb-6">
-                        <div class="flex items-center justify-center gap-2 mb-1">
-                            <h1 class="text-xl font-black text-slate-800">${STATE.user.ism}</h1>
-                            <button onclick="editName()" class="text-slate-300 hover:text-indigo-600 transition"><i data-lucide="edit-3" class="w-3 h-3"></i></button>
-                        </div>
-                        <span class="inline-block px-4 py-1.5 bg-slate-50 text-indigo-500 text-[9px] font-black uppercase rounded-full tracking-widest border border-slate-100">${STATE.user.role.replace('_', ' ')}</span>
-                    </div>
-
-                    <div class="space-y-4 pt-6 border-t border-slate-50">
-                        <button onclick="oModal('change-password')" class="w-full text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-indigo-600 transition-colors bg-slate-50 py-3 rounded-xl border border-slate-100 flex items-center justify-center gap-2"><i data-lucide="key" class="w-3 h-3"></i> Parolni o'zgartirish</button>
-                        <button onclick="logout()" class="w-full text-[10px] font-black uppercase tracking-widest text-red-500 hover:text-red-600 transition-colors bg-red-50 py-3 rounded-xl border border-red-100 flex items-center justify-center gap-2"><i data-lucide="log-out" class="w-3 h-3"></i> Chiqish</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="lg:col-span-3">
-                <div class="mb-10">
-                    <h2 class="text-3xl font-black text-slate-800 mb-6 flex items-center gap-3"><i data-lucide="bar-chart-2" class="text-indigo-600 w-8 h-8"></i> Shaxsiy Analitika</h2>
-                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 stagger-list">
-                        <div class="glass-card p-6 rounded-[2rem] bg-white">
-                            <i data-lucide="zap" class="text-amber-500 w-6 h-6 mb-3"></i>
-                            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Jami Ballar</p>
-                            <h3 class="text-2xl font-black text-slate-800 counter-up">${stats.points}</h3>
-                        </div>
-                        <div class="glass-card p-6 rounded-[2rem] bg-white">
-                            <i data-lucide="book-open" class="text-indigo-600 w-6 h-6 mb-3"></i>
-                            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Darslar</p>
-                            <h3 class="text-2xl font-black text-slate-800">${stats.completedLessons} ta</h3>
-                        </div>
-                        <div class="glass-card p-6 rounded-[2rem] bg-white">
-                            <i data-lucide="swords" class="text-pink-500 w-6 h-6 mb-3"></i>
-                            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Duel Yutuqlari</p>
-                            <h3 class="text-2xl font-black text-slate-800">${stats.duelWins} ta</h3>
-                        </div>
-                        <div class="glass-card p-6 rounded-[2rem] bg-white">
-                            <i data-lucide="calendar" class="text-emerald-500 w-6 h-6 mb-3"></i>
-                            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Davomat</p>
-                            <div class="flex items-center gap-3">
-                                <h3 class="text-2xl font-black text-slate-800">${stats.attendance}%</h3>
-                                <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden flex-1">
-                                    <div class="h-full bg-emerald-500 transition-all duration-1000" style="width: ${stats.attendance}%"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="glass-card p-6 rounded-[2rem] bg-white">
-                            <i data-lucide="message-square" class="text-blue-500 w-6 h-6 mb-3"></i>
-                            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Postlar</p>
-                            <h3 class="text-2xl font-black text-slate-800">${stats.posts} ta</h3>
-                        </div>
-                        <div class="glass-card p-6 rounded-[2rem] bg-white">
-                            <i data-lucide="trending-up" class="text-purple-600 w-6 h-6 mb-3"></i>
-                            <p class="text-[10px] text-slate-400 font-black uppercase tracking-widest">Level Progress</p>
-                            <div class="flex flex-col gap-1">
-                                <span class="text-sm font-black text-slate-800">${stats.level}-Daraja</span>
-                                <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                    <div class="h-full bg-purple-600 transition-all duration-1000" style="width: ${stats.levelPercent}%"></div>
-                                </div>
-                                <span class="text-[9px] text-slate-400 font-bold text-right">${stats.levelPercent}% keyingi darajagacha</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="glass-card p-8 rounded-[2.5rem] bg-white shadow-premium">
-                    <h2 class="text-2xl font-black mb-8 flex items-center gap-3"><i data-lucide="award" class="text-amber-500 w-8 h-8"></i> Mukofotlar Zalы</h2>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                        ${achievements.map(a => `
-                            <div class="p-6 rounded-[2rem] border-2 ${a.unlocked ? `badge-${a.rarity} animate-unlock` : 'border-slate-100 bg-slate-50 opacity-40 grayscale'} flex items-center gap-5 transition-all hover:translate-y-[-5px]">
-                                <div class="w-16 h-16 rounded-2xl bg-white shadow-sm flex items-center justify-center text-4xl ${a.unlocked ? 'animate-bounce-subtle' : ''}">${a.icon}</div>
-                                <div>
-                                    <h4 class="font-black text-slate-800 text-lg mb-1">${a.title}</h4>
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-[9px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-md bg-white border border-slate-100 text-${a.rarity}">${a.rarity}</span>
-                                        ${a.unlocked ? '<span class="text-[9px] font-black text-emerald-500">OCHILGAN</span>' : '<span class="text-[9px] font-black text-slate-400">QULFLANGAN</span>'}
-                                    </div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>`;
-};
-window.uploadAvatar = (input) => {
-    if (input.files && input.files[0]) {
-        const file = input.files[0];
-        if (file.size > 2 * 1024 * 1024) { showToast('Rasm hajmi juda katta (max 2MB)', 'error'); return; }
-        
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            let db = getDB();
-            let u = db.users.find(x => x.id === STATE.user.id);
-            if (u) {
-                u.avatar = e.target.result;
-                STATE.user.avatar = u.avatar;
-                saveDB(db);
-                localStorage.setItem('lms_user', JSON.stringify(STATE.user));
-                
-                // Update Sidebar immediately
-                renderSidebar();
-                // Re-render Profile view
-                renderView('profile');
-                showToast('Rasm muvaffaqiyatli saqlandi! ✨');
-            }
-        };
-        reader.readAsDataURL(file);
-    }
-}
-window.editName = () => {
-    const newName = prompt("Ismingizni tahrirlang:", STATE.user.ism);
-    if (newName && newName.trim()) {
-        let db = getDB();
-        let u = db.users.find(x => x.id === STATE.user.id);
-        if (u) {
-            u.ism = newName.trim();
-            STATE.user.ism = u.ism;
-            saveDB(db);
-            localStorage.setItem('lms_user', JSON.stringify(STATE.user));
-            renderSidebar();
-            renderView('profile');
-            showToast('Ism yangilandi');
-        }
-    }
-}
-
-// Helper function for course card rendering
-const renderCourseCard = (c) => {
-    const db = getDB();
-    const userProgress = (STATE.user.progress && STATE.user.progress[c.id]) || { completed: [], percent: 0 };
-    return `
-        <div class="glass-card p-6 rounded-[2rem] tilt-card cursor-pointer flex flex-col" onclick="opCourse(${c.id})">
-            <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center mb-4"><i data-lucide="book" class="w-6 h-6"></i></div>
-            <h3 class="font-black text-slate-800 text-lg line-clamp-2">${c.title}</h3>
-            <p class="text-sm text-slate-500 mt-2 mb-4 line-clamp-2 flex-grow">${c.description || 'Kurs haqida batafsil ma`lumot'}</p>
-            <div class="mt-auto pt-4 border-t border-slate-100 flex justify-between items-center">
-                <span class="text-xs font-bold text-slate-500">${c.category}</span>
-                <span class="text-xs font-bold px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg">${userProgress.percent}%</span>
-            </div>
-        </div>`;
-};
-
-const d_student = () => {
-    const db = getDB();
+function updateHeaderUser() {
     const u = STATE.user;
-    const stats = getUserStats(u);
-
-    const myCourses = db.courses.filter(c => u.progress && u.progress[c.id]);
-    const popularCourses = db.courses.slice(0, 2); 
-    const approvedPosts = db.posts.filter(p => p.approved).reverse(); 
-    const myGroups = db.groups.filter(g => g.studentIds && g.studentIds.includes(u.id)); 
-
-    return `
-    <div class="space-y-10 animate-fade">
-        <header class="flex flex-col md:flex-row justify-between items-start md:items-center p-10 bg-white rounded-[3rem] shadow-premium relative overflow-hidden">
-            <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-500/5 rounded-full blur-3xl"></div>
-            <div class="relative z-10">
-                <h1 class="text-4xl font-black text-slate-800 mb-2">Salom, ${u.ism}! 👋</h1>
-                <div class="flex items-center gap-4">
-                    <span class="px-4 py-1.5 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest">LEVEL ${stats.level}</span>
-                    <div class="flex-1 w-48 h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div class="h-full bg-indigo-600 rounded-full transition-all duration-1000" style="width: ${stats.levelPercent}%"></div>
-                    </div>
-                    <span class="text-xs font-bold text-slate-400">${u.points} XP</span>
-                </div>
-            </div>
-            <div class="flex gap-4 mt-6 md:mt-0 relative z-10">
-                <div class="bg-indigo-50 p-4 rounded-3xl text-center min-w-[100px]">
-                    <p class="text-[10px] font-black uppercase text-indigo-400 mb-1">XP Points</p>
-                    <p class="text-2xl font-black text-indigo-600">${u.points}</p>
-                </div>
-            </div>
-        </header>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div class="lg:col-span-2 space-y-8">
-                <!-- Courses -->
-                <section>
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-black text-slate-800">Mening Kurslarim</h2>
-                        <a href="#courses" class="text-indigo-600 font-black text-sm hover:underline">Hammasi</a>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        ${myCourses.length ? myCourses.map(c => renderCourseCard(c)).join('') : popularCourses.map(c => renderCourseCard(c)).join('')}
-                    </div>
-                </section>
-                
-                <!-- POST FEED ON LOGIN (DASHBOARD) -->
-                <section>
-                    <h2 class="text-2xl font-black text-slate-800 mb-6 flex items-center justify-between">
-                        So'nggi Postlar 
-                        <button onclick="renderView('posts')" class="text-sm font-bold text-indigo-600 hover:underline">Barchasi</button>
-                    </h2>
-                    <div class="space-y-6">
-                        ${approvedPosts.length === 0 ? '<div class="glass-card p-10 text-center"><p class="text-slate-400 font-bold">Hozircha postlar yo\'q.</p></div>' : approvedPosts.map(p => `
-                        <article class="glass-card overflow-hidden rounded-[2.5rem] border border-slate-100 group shadow-sm hover:shadow-xl transition-all">
-                            ${p.image ? `
-                            <div class="relative h-64 overflow-hidden cursor-zoom-in" onclick="zoomImage({src: '${p.image}'})">
-                                <img src="${p.image}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700">
-                            </div>` : ''}
-                            <div class="p-6 md:p-8 space-y-4 relative">
-                                <div class="flex items-center gap-4">
-                                    <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-black">${p.author?.[0] || 'A'}</div>
-                                    <div>
-                                        <p class="font-black text-slate-800">${p.author || 'Admin'}</p>
-                                        <p class="text-xs text-slate-400 font-bold tracking-widest">${p.date}</p>
-                                    </div>
-                                </div>
-                                <h3 class="text-2xl font-black text-slate-800 group-hover:text-indigo-600 transition-colors">${p.title}</h3>
-                                <p class="text-slate-600 text-base leading-relaxed font-medium whitespace-pre-wrap">${p.content}</p>
-                                <div class="pt-4 border-t border-slate-50 flex items-center justify-between">
-                                    <button onclick="toggleLike(${p.id}, this)" class="flex items-center gap-2 text-slate-400 hover:text-pink-500 font-bold transition-colors ${p.liked_users && p.liked_users.includes(u.id) ? '!text-pink-500' : ''}">
-                                        <i data-lucide="heart" class="w-5 h-5 ${(p.liked_users && p.liked_users.includes(u.id)) ? 'fill-current' : ''}"></i>
-                                        <span class="like-counter">${p.likes || 0}</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </article>`).join('')}
-                    </div>
-                </section>
-            </div>
-
-            <!-- Stats & Leaderboard & Schedule -->
-            <div class="space-y-8">
-                <!-- Weekly schedule summary for sidebar -->
-                <div class="glass-card p-6 rounded-[2.5rem]">
-                    <h3 class="font-black text-slate-800 mb-4 flex items-center gap-2 text-base">
-                        <i data-lucide="calendar" class="text-indigo-600 w-4 h-4"></i> Hafta jadvali
-                        <button onclick="renderView('schedule')" class="ml-auto text-[10px] font-black text-indigo-600 hover:underline uppercase tracking-widest">To'liq Ko'rish</button>
-                    </h3>
-                    <div class="space-y-2">
-                    ${['Dushanba','Seshanba','Chorshanba','Payshanba','Juma','Shanba'].map((day,di) => {
-                        const slots = [];
-                        myGroups.forEach(g => (g.schedule||[]).filter(s=>s.dayIndex===di).forEach(s=>slots.push(s)));
-                        return slots.length > 0 ? `
-                        <div class="flex items-start gap-3">
-                            <span class="text-[10px] font-black text-slate-400 uppercase w-20 pt-0.5 shrink-0">${day.slice(0,3)}</span>
-                            <div class="flex flex-wrap gap-1 flex-1">
-                                ${slots.map(s=>`<span class="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-[10px] font-black">${s.time}</span>`).join('')}
-                            </div>
-                        </div>` : '';
-                    }).filter(Boolean).join('') || '<p class="text-slate-300 font-bold text-xs">Jadval belgilanmagan</p>'}
-                    </div>
-                </div>
-
-                <div class="glass-card p-8 rounded-[2.5rem]">
-                    <div class="flex justify-between items-center mb-8">
-                        <h3 class="font-black text-slate-800 text-xl">Statistika</h3>
-                        <div class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center"><i data-lucide="activity"></i></div>
-                    </div>
-                    <div class="space-y-6">
-                        <div class="flex justify-between items-center">
-                            <span class="text-slate-400 font-bold">Ballar</span>
-                            <span class="text-indigo-600 font-black text-xl">${u.points} XP</span>
-                        </div>
-                        <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-                            <div class="h-full bg-indigo-600 rounded-full" style="width: ${Math.min(u.points/10, 100)}%"></div>
-                        </div>
-                        <div class="flex justify-between items-center">
-                            <span class="text-slate-400 font-bold">Guruh</span>
-                            <span class="text-slate-800 font-black">${db.groups.find(g => g.id === u.groupId)?.name || '-'}</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>`;
-};
-
-const v_courses = () => `
-    <h1 class="text-3xl font-black text-slate-800 mb-8">Barcha Kurslar</h1>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        ${getDB().courses.map(c => `
-            <div class="glass-card p-6 rounded-[2rem] tilt-card cursor-pointer flex flex-col" onclick="opCourse(${c.id})">
-                <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center mb-4"><i data-lucide="book" class="w-6 h-6"></i></div>
-                <h3 class="font-black text-slate-800 text-lg line-clamp-2">${c.title}</h3>
-                <p class="text-sm text-slate-500 mt-2 mb-4 line-clamp-2 flex-grow">${c.description || 'Kurs haqida batafsil ma`lumot'}</p>
-                <div class="mt-auto pt-4 border-t border-slate-100 flex justify-between items-center"><span class="text-xs font-bold text-slate-500">${c.category}</span><span class="text-xs font-bold px-2 py-1 bg-emerald-50 text-emerald-600 rounded-lg">${c.status}</span></div>
-            </div>
-        `).join('')}
-    </div>`;
-
-window.opCourse = id => { STATE.activeCourseId = id; window.location.hash = 'course-detail'; };
-const v_cdetail = () => {
-    const db = getDB();
-    const c = db.courses.find(x => x.id === STATE.activeCourseId); if (!c) return `Kurs topilmadi`;
-    const les = c.lessons || [];
-    const userProgress = (STATE.user.progress && STATE.user.progress[c.id]) || { completed: [], percent: 0 };
-
-    return `
-    <button onclick="window.location.hash='courses'" class="text-slate-500 hover:text-slate-800 mb-4 font-bold flex items-center transition-colors"><i data-lucide="arrow-left" class="w-4 h-4 mr-1"></i> Orqaga</button>
-    <div class="glass-card p-8 rounded-[2.5rem] mb-8 bg-gradient-to-br from-white to-slate-50 border-white/50 relative overflow-hidden">
-        <div class="absolute top-0 right-0 p-8 opacity-10"><i data-lucide="book" class="w-32 h-32"></i></div>
-        <div class="relative z-10 flex justify-between items-start mb-6">
-            <div>
-                <h1 class="text-4xl font-black text-slate-800 tracking-tight leading-tight">${c.title}</h1>
-                <p class="text-indigo-600 font-black mt-2 uppercase tracking-widest text-xs">${c.category}</p>
-            </div>
-            ${(STATE.user.id === c.authorId || STATE.user.id === c.teacherId || STATE.user.role === 'admin') ? `
-                <button onclick="oModal('add-lesson')" class="bg-indigo-600 text-white px-6 py-3 font-bold rounded-2xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-2">
-                    <i data-lucide="plus" class="w-5 h-5"></i> Dars qo'shish
-                </button>` : ''}
-        </div>
-        <p class="text-slate-600 font-medium text-lg max-w-3xl mb-8">${c.description || 'Kurs haqida batafsil ma`lumot keltirilmagan.'}</p>
-        
-        <div class="w-full max-w-sm">
-            <div class="flex justify-between items-center mb-2">
-                <span class="text-sm font-black text-slate-400 uppercase tracking-widest">O'zlashtirish</span>
-                <span class="text-sm font-black text-indigo-600">${userProgress.percent}%</span>
-            </div>
-            <div class="w-full h-3 bg-slate-200/50 rounded-full overflow-hidden">
-                <div class="h-full bg-indigo-600 rounded-full transition-all duration-1000 shadow-[0_0_12px_rgba(79,70,229,0.4)]" style="width: ${userProgress.percent}%"></div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="space-y-4 max-w-4xl mx-auto pb-20">
-        <h3 class="text-xl font-black text-slate-800 mb-6 px-2 flex items-center gap-2">
-            <i data-lucide="play-circle" class="text-indigo-600"></i> Darslar ro'yxati (<span class="text-indigo-600">${les.length}</span>)
-        </h3>
-        ${les.length === 0 ? `
-            <div class="text-center p-20 bg-white border border-slate-100 rounded-[3rem] shadow-sm">
-                <div class="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center mx-auto mb-6"><i data-lucide="video" class="w-10 h-10 text-slate-200"></i></div>
-                <p class="text-slate-400 font-black text-xl">Hozircha darslar yuklanmagan</p>
-            </div>` : 
-            les.map((l, i) => {
-                const isCompleted = userProgress.completed.includes(l.id);
-                return `
-                <div class="p-6 bg-white border-2 ${isCompleted ? 'border-emerald-100' : 'border-slate-50'} rounded-[2rem] shadow-sm hover:shadow-2xl hover:border-indigo-100 transition-all cursor-pointer flex gap-6 tilt-card items-center group relative overflow-hidden" onclick="oModal('read-lesson', ${l.id})">
-                    ${isCompleted ? '<div class="absolute top-0 right-0 bg-emerald-500 text-white px-4 py-1 rounded-bl-2xl text-[10px] font-black uppercase tracking-widest">Tugallangan</div>' : ''}
-                    <div class="w-14 h-14 shrink-0 bg-slate-50 text-slate-400 rounded-2xl font-black flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all text-xl shadow-inner">${i + 1}</div>
-                    <div class="flex-1">
-                        <p class="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-1">${l.topic || 'Mavzu belgilanmagan'}</p>
-                        <h3 class="font-black text-slate-800 text-xl group-hover:text-indigo-600 transition-colors">${l.title}</h3>
-                        <p class="text-sm text-slate-400 line-clamp-1 mt-1 font-medium italic">${l.content.substring(0, 100)}...</p>
-                    </div>
-                    <div class="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition-all">
-                        <i data-lucide="${l.videoUrl ? 'play' : 'file-text'}" class="w-6 h-6 ${l.videoUrl ? 'fill-current' : ''}"></i>
-                    </div>
-                </div>`;
-            }).join('')}
-    </div>`;
-};
-
-// ======================== MODALS & OTHERS ========================
-window.oModal = (type, lId) => {
-    const bg = document.getElementById('modal-root'), a = document.getElementById('modal-content-area');
-    bg.classList.remove('hidden'); bg.classList.add('flex');
-    let m = '';
-    if (type === 'add-course') m = `<div class="bg-white p-10 rounded-[2.5rem] animate-zoom w-full max-w-lg shadow-2xl"><h2 class="text-3xl font-black mb-6 text-slate-800">Kurs Yaratish</h2><form onsubmit="svCourse(event)"><div class="space-y-4"><input id="mc-t" required placeholder="Kurs nomi" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white"><textarea id="mc-d" required placeholder="Kurs tavsifi..." class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white" rows="4"></textarea><button class="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all">Kursni Saqlash</button></div></form></div>`;
-    
-    if (type === 'add-lesson') m = `<div class="bg-white p-10 rounded-[2.5rem] animate-zoom w-full max-w-xl shadow-2xl"><h2 class="text-3xl font-black mb-6 text-slate-800">Yangi Dars</h2><form onsubmit="svLesson(event)"><div class="space-y-4"><input id="ml-top" required placeholder="Mavzu nomi (masalan: JS Kirish)" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white"><input id="ml-t" required placeholder="Dars sarlavhasi (masalan: 1-dars)" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white"><input id="ml-vid" placeholder="YouTube URL (ixtiyoriy)" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white"><textarea id="ml-c" required placeholder="Dars matni / Konspekt..." class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white" rows="6"></textarea><button class="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl shadow-xl shadow-indigo-600/20 hover:bg-indigo-700 transition-all">Darsni Kiritish</button></div></form></div>`;
-    
-    if (type === 'read-lesson') {
-        const _db = getDB();
-        let l = null;
-        for (const _c of _db.courses) {
-            const _found = (_c.lessons || []).find(x => x.id === lId);
-            if (_found) { l = { ..._found, courseId: _c.id }; break; }
-        }
-        if (!l) { a.innerHTML = '<div class="p-10 text-center"><p class="text-red-500 font-black">Dars topilmadi!</p></div>'; return; }
-        let ytEmbed = '';
-        if (l.videoUrl) {
-            let vid = l.videoUrl.split('v=')[1] || l.videoUrl.split('/').pop();
-            if (vid) {
-                const ampersandPosition = vid.indexOf('&');
-                if (ampersandPosition !== -1) vid = vid.substring(0, ampersandPosition);
-                ytEmbed = `<div class="video-container mb-8"><iframe src="https://www.youtube.com/embed/${vid}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe></div>`;
-            }
-        }
-        m = `
-        <div class="bg-white p-0 rounded-[3rem] max-h-[92vh] overflow-y-auto w-full max-w-4xl animate-slide-up shadow-2xl border border-white relative">
-            <div class="sticky top-0 bg-white/80 backdrop-blur-md p-6 border-b border-slate-100 flex justify-between items-center z-20">
-                <div>
-                     <p class="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-0.5">${l.topic || 'Mavzu: Kirish'}</p>
-                     <h2 class="text-3xl font-black text-slate-800">Dars: ${l.title}</h2>
-                </div>
-                <button onclick="cModal()" class="bg-slate-100 p-3 rounded-2xl text-slate-500 hover:bg-red-50 hover:text-red-500 transition-all"><i data-lucide="x" class="w-6 h-6"></i></button>
-            </div>
-            <div class="p-10">
-                <div class="max-w-3xl mx-auto">
-                    <!-- Smart 20-min Timer Box -->
-                    ${STATE.user.role === 'student' ? `
-                    <div id="lesson-timer-box" class="lesson-timer-box mb-10">
-                        <div class="timer-ring-wrap">
-                            <svg viewBox="0 0 44 44" class="timer-ring">
-                                <circle cx="22" cy="22" r="18" fill="none" stroke="#e0e7ff" stroke-width="4"/>
-                                <circle cx="22" cy="22" r="18" fill="none" stroke="#4f46e5" stroke-width="4" stroke-dasharray="113" stroke-dashoffset="113" stroke-linecap="round" style="transition:stroke-dashoffset 1s linear;transform:rotate(-90deg);transform-origin:center"/>
-                            </svg>
-                            <span class="timer-text">0:00</span>
-                        </div>
-                        <div class="timer-msg">${t('timerMsg')} <b>0%</b></div>
-                    </div>` : ''}
-                    <div class="mb-6 p-4 bg-indigo-50 border-l-4 border-indigo-500 rounded-r-2xl">
-                        <p class="text-indigo-600 font-bold">Mavzu tavsifi: <span class="text-slate-700">${l.topic || ''}</span></p>
-                    </div>
-                    <div class="prose max-w-none text-slate-700 leading-relaxed font-medium text-lg whitespace-pre-wrap mb-10">
-                        ${l.content}
-                    </div>
-                    ${ytEmbed ? `
-                    <div class="mb-12">
-                        <h3 class="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2"><i data-lucide="play-circle" class="text-indigo-600 w-8 h-8"></i> Video Darslik</h3>
-                        ${ytEmbed}
-                    </div>` : ''}
-                    <div class="mt-16 pt-10 border-t border-slate-100">
-                        <button onclick="completeLesson(${l.id}, ${l.courseId})" class="w-full bg-emerald-500 text-white font-black py-6 rounded-[2.5rem] hover:bg-emerald-600 shadow-xl shadow-emerald-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3">
-                            <i data-lucide="check-circle" class="w-8 h-8"></i> Darsni yakunlash va Ball olish
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>`;
-    }
-    if (type === 'add-post') {
-        m = `
-        <div class="bg-white p-10 rounded-[3rem] w-full max-w-xl animate-zoom relative overflow-hidden">
-             <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-50 rounded-full blur-3xl"></div>
-             <h2 class="text-3xl font-black mb-8 text-slate-800 relative flex items-center gap-3">
-                <div class="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center"><i data-lucide="edit-3" class="w-6 h-6"></i></div>
-                Yangi Post Yarating
-             </h2>
-             <form onsubmit="svPost(event)" class="space-y-6 relative">
-                 <div id="post-image-preview" class="hidden h-64 w-full rounded-[2.5rem] overflow-hidden border-4 border-white shadow-2xl mb-8 group relative">
-                    <div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <span class="text-white font-black text-xs uppercase tracking-widest bg-black/40 px-4 py-2 rounded-full">Tanlangan Rasm</span>
-                    </div>
-                 </div>
-                 <input id="p-title" required placeholder="Sarlavha" class="w-full bg-slate-50 border-none px-6 py-4 rounded-2xl font-bold focus:ring-4 ring-indigo-50 outline-none transition-all">
-                 <textarea id="p-content" required placeholder="Mazmuni..." rows="6" class="w-full bg-slate-50 border-none px-6 py-4 rounded-2xl font-semibold focus:ring-4 ring-indigo-50 outline-none transition-all resize-none"></textarea>
-                 
-                 <label class="flex items-center gap-3 p-4 bg-indigo-50 text-indigo-600 rounded-2xl cursor-pointer hover:bg-indigo-100 transition-all font-black">
-                     <i data-lucide="image"></i> Rasm yuklash
-                     <input type="file" id="p-image-input" class="hidden" accept="image/*" onchange="previewPostImage(this)">
-                 </label>
-                 
-                 <div class="flex gap-4">
-                     <button type="button" onclick="cModal()" class="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl">Bekor qilish</button>
-                     <button class="flex-2 bg-indigo-600 text-white font-black px-10 py-4 rounded-2xl shadow-xl shadow-indigo-200">Nashr etish</button>
-                 </div>
-             </form>
-        </div>`;
-    }
-    if (type === 'add-tkt') m = `<div class="bg-white p-8 rounded-[2rem] animate-zoom"><h2 class="text-2xl font-black mb-4">Texnik Yordam</h2><form onsubmit="svTkt(event)"><textarea id="m-desc" required placeholder="Nima qiyinchilik tug'ildi?" class="w-full border p-3 rounded-xl mb-3 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 transition-all font-semibold" rows="4"></textarea><button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition-all">Yuborish</button></form></div>`;
-    if (type === 'view-tkt') {
-        const t = getDB().tickets.find(x => x.id === lId);
-        STATE.activeTicketId = lId;
-        m = `<div class="bg-slate-50 p-0 rounded-[2rem] max-h-[85vh] flex flex-col w-full max-w-2xl animate-zoom overflow-hidden border border-slate-200 shadow-2xl">
-            <div class="glass p-5 border-b border-slate-200 flex justify-between items-center z-10">
-                <div><h3 class="font-black text-slate-800 text-lg">Ticket #${t.id}</h3><p class="text-sm text-slate-500 font-medium">${t.user_name}</p></div>
-                <div class="flex items-center gap-3">
-                    ${STATE.user.role === 'admin' ? `
-                    <select id="tkt-status-${t.id}" onchange="changeTktStatus(${t.id}, this.value)" class="bg-white border border-slate-200 text-sm font-bold rounded-lg px-3 py-1.5 outline-none cursor-pointer">
-                        <option value="Ochiq" ${t.status === 'Ochiq' ? 'selected' : ''}>Ochiq</option>
-                        <option value="Jarayonda" ${t.status === 'Jarayonda' ? 'selected' : ''}>Jarayonda</option>
-                        <option value="Yopilgan" ${t.status === 'Yopilgan' ? 'selected' : ''}>Yopilgan</option>
-                    </select>` : `<span class="px-3 py-1 bg-white border border-slate-200 rounded-lg text-sm font-bold shadow-sm">${t.status}</span>`}
-                    <button onclick="cModal()" class="w-8 h-8 flex justify-center items-center bg-slate-200 text-slate-600 hover:bg-slate-300 rounded-full transition-colors"><i data-lucide="x" class="w-4 h-4"></i></button>
-                </div>
-            </div>
-            <div class="p-6 overflow-y-auto flex-1 bg-white space-y-4" id="tkt-replies">
-                <div class="flex flex-col items-start gap-1"><div class="bg-slate-100 text-slate-800 p-4 rounded-2xl rounded-tl-sm max-w-[85%] font-medium">${t.message}</div></div>
-                ${t.replies.map(r => `<div class="flex flex-col ${r.user_id === STATE.user.id ? 'items-end' : 'items-start'} gap-1 mb-2 animate-slide-up"><span class="text-[10px] font-bold text-slate-400 px-1">${r.user_name}</span><div class="p-4 rounded-2xl ${r.user_id === STATE.user.id ? 'bg-indigo-600 text-white rounded-tr-sm shadow-md shadow-indigo-600/20' : 'bg-slate-100 text-slate-800 rounded-tl-sm'} max-w-[85%] font-medium whitespace-pre-wrap">${r.text}</div></div>`).join('')}
-            </div>
-            <form onsubmit="svReply(event)" class="p-4 bg-white border-t border-slate-200 flex gap-2 items-end">
-                <textarea id="reply-text" required placeholder="Javob yozish..." class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-400 transition-colors resize-none disabled:opacity-50" rows="1" ${t.status === 'Yopilgan' ? 'disabled' : ''}></textarea>
-                <button ${t.status === 'Yopilgan' ? 'disabled' : ''} class="bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md"><i data-lucide="send" class="w-5 h-5"></i></button>
-            </form>
-        </div>`;
-    }
-    if (type === 'view-group-attendance') {
-        const db = getDB();
-        const gId = lId;
-        const group = db.groups.find(g => g.id === gId);
-        if (!group) return `Guruh topilmadi`;
-
-        const today = new Date().toISOString().split('T')[0];
-        const record = db.attendance.find(a => a.groupId === gId && a.date === today);
-        
-        m = `
-        <div class="bg-white p-6 md:p-10 rounded-[2.5rem] md:rounded-[4rem] max-h-[95vh] overflow-y-auto w-full max-w-4xl shadow-[0_30px_100px_-20px_rgba(0,0,0,0.15)] animate-slide-up border border-white relative">
-            <div class="absolute top-0 right-0 w-64 h-64 bg-indigo-50/30 rounded-full blur-3xl -mr-20 -mt-20"></div>
-            
-            <div class="flex justify-between items-center mb-8 relative z-10">
-                <div>
-                     <p class="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-1">Guruh Boshqaruvi</p>
-                     <h2 class="text-3xl md:text-4xl font-black text-slate-800">${group.name}</h2>
-                </div>
-                <button onclick="cModal()" class="bg-slate-100 p-3 md:p-4 rounded-2xl md:rounded-3xl text-slate-500 hover:bg-red-50 hover:text-red-500 transition-all active:scale-90"><i data-lucide="x" class="w-6 h-6"></i></button>
-            </div>
-            
-            <div class="space-y-6 relative z-10">
-                <div class="hidden md:grid grid-cols-12 gap-4 px-8 mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                    <div class="col-span-1">№</div>
-                    <div class="col-span-5">O'quvchi va Telefon</div>
-                    <div class="col-span-6 text-center">Davomat va Sabab</div>
-                </div>
-                ${group.studentIds.map((sid, idx) => {
-                    const st = db.users.find(u => u.id === sid);
-                    if (!st) return '';
-                    const status = record ? record.records[sid] : null;
-                    const reason = record ? (record.reasons?.[sid] || '') : '';
-                    const phone = st.phone || '';
-                    const isUstoz = STATE.user.role === 'ustoz';
-                    
-                    return `
-                    <div class="premium-card p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] flex flex-col gap-6 hover:translate-y-[-5px] transition-all bg-white border-slate-100 shadow-premium group">
-                        <div class="grid grid-cols-1 md:grid-cols-12 items-center gap-6">
-                            <div class="hidden md:block col-span-1 font-black text-slate-200 text-3xl">${idx + 1}</div>
-                            <div class="col-span-1 md:col-span-5 flex items-center gap-5">
-                                <div class="w-16 h-16 bg-slate-50 rounded-[1.8rem] flex items-center justify-center font-black text-indigo-600 border border-slate-100 shadow-inner group-hover:bg-indigo-600 group-hover:text-white transition-all transform group-hover:rotate-6 text-xl">${st.ism[0]}</div>
-                                <div class="flex-1">
-                                    <h4 class="font-black text-slate-800 text-xl mb-1">${st.ism}</h4>
-                                    <div class="flex flex-col gap-1">
-                                        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Talaba ID: #${st.id}</p>
-                                        <div class="flex items-center gap-2 mt-1">
-                                            <i data-lucide="phone" class="w-3 h-3 text-slate-400"></i>
-                                            ${isUstoz ? `
-                                                <input type="text" value="${phone}" placeholder="Phone..." 
-                                                    onchange="updateStudentPhone(${st.id}, this.value)"
-                                                    class="text-xs font-bold text-indigo-600 bg-transparent border-b border-dashed border-slate-200 focus:border-indigo-500 outline-none p-0.5 w-full">
-                                            ` : `<span class="text-xs font-bold text-slate-500">${phone || 'Kiritilmagan'}</span>`}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="col-span-1 md:col-span-6 flex flex-col items-center gap-4">
-                                <div class="attendance-switch-premium ${status === 'present' ? 'present' : (status === 'absent' ? 'absent' : '')}" onclick="markAttendance(${gId}, ${sid}, this)">
-                                    <div class="bg-present">Keldi</div>
-                                    <div class="bg-absent">Kelmadi</div>
-                                    <div class="toggle-indicator"></div>
-                                </div>
-                                <div id="reason-container-${sid}" class="${status === 'absent' ? '' : 'hidden'} w-full">
-                                    <input type="text" id="reason-${sid}" value="${reason}" 
-                                        placeholder="Sabab yozing..." 
-                                        onchange="updateAttendanceReason(${gId}, ${sid}, this.value)"
-                                        class="w-full bg-red-50/50 border border-red-100 rounded-xl px-4 py-3 text-sm font-bold text-red-600 focus:ring-2 ring-red-100 outline-none transition-all placeholder:text-red-300">
-                                </div>
-                            </div>
-                        </div>
-                    </div>`;
-                }).join('')}
-                ${group.studentIds.length === 0 ? '<div class="py-20 text-center text-slate-300 font-black italic">Guruhda talabalar mavjud emas</div>' : ''}
-            </div>
-            
-            <div class="mt-10 pt-8 border-t border-slate-100 flex justify-end">
-                <button onclick="cModal()" class="bg-slate-900 text-white px-10 py-4 rounded-2xl font-black shadow-xl hover:bg-slate-800 transition-all btn-interactive">Saqlash va Yopish</button>
-            </div>
-        </div>`;
-    }
-    a.innerHTML = m; safeLucide(a);
-    if (type === 'view-tkt') {
-        const repBox = document.getElementById('tkt-replies');
-        repBox.scrollTop = repBox.scrollHeight;
-    }
-    // Start lesson timer if opening a lesson
-    if (type === 'read-lesson' && STATE.user.role === 'student') {
-        setTimeout(() => startLessonTimer(lId), 200);
-    }
-}
-window.cModal = () => { 
-    STATE.activeTicketId = null; 
-    document.getElementById('modal-root').classList.replace('flex', 'hidden');
-    // Stop timer if lesson modal closes
-    stopLessonTimer();
-}
-document.addEventListener('keydown', e => { if (e.key === 'Escape') cModal(); });
-document.getElementById('modal-root').addEventListener('click', e => { if (e.target.id === 'modal-root') cModal(); });
-
-window.svCourse = async (e) => { 
-    e.preventDefault(); 
-    const newCourse = { 
-        id: Date.now(), 
-        title: document.getElementById('mc-t').value, 
-        description: document.getElementById('mc-d').value, 
-        teacherId: STATE.user.id, 
-        category: 'Dasturlash', 
-        status: 'Ochiq',
-        lessons: []
-    };
-
-    // Immediate UI update
-    let db = getDB();
-    db.courses.push(newCourse);
-    saveDB(db);
-    cModal();
-    renderView(STATE.view);
-    showToast('Kurs muvaffaqiyatli yaratildi');
-
-    // Sync to backend
-    try {
-        await fetch(`${API_BASE}/courses`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newCourse)
-        });
-        syncBackend(); syncLandingData(); // Full sync to ensure consistency
-    } catch (err) {
-        console.error("Backend save failed:", err);
-    }
-}
-window.svLesson = async (e) => { 
-    e.preventDefault(); 
-    let db = getDB(); 
-    const course = db.courses.find(c => c.id === STATE.activeCourseId);
-    if (!course) return;
-
-    const newLesson = { 
-        id: Date.now(), 
-        courseId: STATE.activeCourseId, 
-        topic: document.getElementById('ml-top').value, 
-        title: document.getElementById('ml-t').value, 
-        videoUrl: document.getElementById('ml-vid').value, 
-        content: document.getElementById('ml-c').value 
-    };
-
-    course.lessons = course.lessons || [];
-    course.lessons.push(newLesson);
-    
-    saveDB(db); 
-    cModal(); 
-    renderView(STATE.view); 
-    showToast('Yangi dars qo\'shildi'); 
-
-    // Sync to backend
-    try {
-        await fetch(`${API_BASE}/courses/${STATE.activeCourseId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ lessons: course.lessons })
-        });
-        syncBackend(); syncLandingData();
-    } catch (err) {
-        console.error("Backend lesson save failed:", err);
-    }
-}
-
-window.completeLesson = (lId, cId) => {
-    let db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
     if (!u) return;
+    const av = document.getElementById('sidebar-avatar');
+    const nm = document.getElementById('sidebar-name');
+    const rl = document.getElementById('sidebar-role');
+    if (av) av.outerHTML = avatarHtml(u, 'avatar-sm').replace('avatar avatar-sm', 'avatar avatar-sm')
+        .replace(/^/, '').replace('class="avatar', `id="sidebar-avatar" class="avatar`);
+    if (nm) nm.textContent = u.ism;
+    if (rl) rl.textContent = roleLabel(u.role);
+    // Tepa paneldagi chiplar ham xuddi shu ma'lumotni ko'rsatadi
+    const tAv = document.getElementById('topbar-avatar');
+    const tNm = document.getElementById('topbar-name');
+    const tRl = document.getElementById('topbar-role');
+    if (tAv) tAv.outerHTML = avatarHtml(u, 'avatar-sm')
+        .replace('class="avatar', 'id="topbar-avatar" class="avatar');
+    if (tNm) tNm.textContent = u.ism;
+    if (tRl) tRl.textContent = roleLabel(u.role);
+}
 
-    u.progress = u.progress || {};
-    u.progress[cId] = u.progress[cId] || { completed: [], percent: 0 };
-    
-    if (!u.progress[cId].completed.includes(lId)) {
-        u.progress[cId].completed.push(lId);
-        const course = db.courses.find(c => c.id === cId);
-        const lessons = course.lessons || [];
-        u.progress[cId].percent = Math.round((u.progress[cId].completed.length / lessons.length) * 100);
-        
-        saveDB(db);
-        addPoints(7, "Dars o'qildi", "lessons");
-        cModal();
-        renderView('course-detail');
-    } else {
-        showToast("Bu darsni allaqachon yakunlagansiz", "info");
-    }
-};
-// Removed duplicate completeLesson (handled via window.completeLesson earlier)
+function setShellChrome(on) {
+    const header = document.getElementById('mobile-header');
+    const main = document.getElementById('main-content');
+    const bottom = document.getElementById('mobile-bottom-nav');
+    const sidebar = document.getElementById('sidebar-container');
+    if (header) header.classList.toggle('hidden', !on);
+    if (main) main.classList.toggle('has-sidebar', on);
+    if (bottom) bottom.classList.toggle('hidden', !on);
+    // Ish stolida yon panel doim ko'rinadi (`@media min-width:1024px`), lekin
+    // faqat tizimga kiringandan keyin. Aks holda kirish/ro'yxatdan o'tish
+    // sahifalarida ham yon panel paydo bo'lib qolardi.
+    if (sidebar) sidebar.classList.toggle('is-live', on);
+    if (on) closeSidebar(); else { sidebar?.classList.remove('is-open'); }
+}
 
-let POST_IMAGE_READY = null;
-window.previewPostImage = (input) => {
-    if (input.files && input.files[0]) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            POST_IMAGE_READY = e.target.result;
-            const preview = document.getElementById('post-image-preview');
-            preview.innerHTML = `<img src="${POST_IMAGE_READY}" class="w-full h-full object-cover rounded-[2rem]">`;
-            preview.classList.remove('hidden');
-        };
-        reader.readAsDataURL(input.files[0]);
-    }
-};
+// ══════════════════════════════════════════════════════════════════════
+//  Route handling
+// ══════════════════════════════════════════════════════════════════════
+function showSection(id) {
+    ['view-home', 'view-login', 'view-register', 'dashboard-wrapper'].forEach(s => {
+        document.getElementById(s)?.classList.add('hidden');
+    });
+    if (id) document.getElementById(id)?.classList.remove('hidden');
+}
 
-window.svPost = async (e) => {
-    e.preventDefault();
-    const title = document.getElementById('p-title').value.trim();
-    const content = document.getElementById('p-content').value.trim();
-    
-    if (!title || !content) {
-        showToast("Sarlavha va matn qisman bo'sh bo'lishi mumkin emas!", "error");
+async function renderView(view) {
+    if (!ALL_VIEWS.has(view)) view = STATE.user ? DASHBOARD_VIEW[STATE.user.role] : 'home';
+    STATE.view = view;
+
+    document.title = `${VIEW_TITLES[view] || "O’quv.uz"} — O’quv.uz`;
+    closeSidebar();
+
+    // Public pages
+    if (PUBLIC_VIEWS.has(view)) {
+        setShellChrome(false);
+        renderSidebar();
+        showSection(`view-${view}`);
+        if (view === 'home') {
+            const box = document.getElementById('landing-content');
+            box.innerHTML = renderLanding();
+            safeLucide(box);
+        }
+        // Ro'yxatdan o'tish yopiq bo'lsa, to'g'ridan-to'g'ri #register
+        // orqali kirsangiz ham shaklni ko'rsatmaymiz.
+        if (view === 'register') {
+            if (STATE.allowRegistration === false) {
+                showToast("Ro‘yxatdan o‘tish vaqtincha yopilgan", 'warn');
+                window.location.hash = 'login';
+                return;
+            }
+            renderRegisterGroups();
+        }
+        updateNotifBadges();
         return;
     }
 
-    const image = POST_IMAGE_READY;
-    const today = new Date().toLocaleDateString('uz-UZ', { year: 'numeric', month: 'long', day: 'numeric' });
+    if (!STATE.user) { window.location.hash = 'login'; return; }
 
-    const newPost = {
-        id: Date.now(),
-        title: title,
-        content: content,
-        image: image,
-        authorId: STATE.user.id,
-        author: STATE.user.ism,
-        date: today,
-        createdAt: new Date().toISOString(),
-        approved: true,
-        status: 'approved',
-        likes: 0,
-        liked_users: [],
-        comments: []
-    };
+    setShellChrome(true);
+    showSection('dashboard-wrapper');
+    const area = document.getElementById('dynamic-view-area');
+    area.innerHTML = `<div class="loading-box"><span class="spinner"></span> Yuklanmoqda…</div>`;
 
-    // Immediate local update
-    let db = getDB();
-    db.posts.push(newPost);
-    saveDB(db);
-    cModal();
-    renderView(STATE.view);
-    showToast('Post yuborildi');
-    POST_IMAGE_READY = null;
+    renderSidebar();
+    renderMobileNav();
 
-    // Send to backend
+    // Ro'yxatdan o'tgan, lekin admin tasdiqlagancha kirish mumkin emas
+    if (isAwaitingApproval() && view !== 'pending') {
+        area.innerHTML = pendingGate();
+        safeLucide(area);
+        animateIn(area);
+        updateNotifBadges();
+        return;
+    }
+
+    const renderer = VIEWS[view];
+    if (!renderer) {
+        area.innerHTML = emptyState('compass', 'Sahifa topilmadi');
+        safeLucide(area);
+        return;
+    }
+
     try {
-        await fetch(`${API_BASE}/posts`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newPost)
-        });
-        syncBackend(); syncLandingData();
-    } catch (err) {
-        console.error("Backend save failed:", err);
+        const html = await renderer();
+        area.innerHTML = html;
+        safeLucide(area);
+        animateIn(area);
+        runAfterRender(view);
+    } catch (e) {
+        area.innerHTML = emptyState('triangle-alert', 'Xatolik yuz berdi', e?.message || '', `
+            <button class="btn btn-outline btn-sm" onclick="go('${DASHBOARD_VIEW[STATE.user.role] || 'courses'}')">
+                <i data-lucide="arrow-left"></i> Orqaga
+            </button>`);
+        safeLucide(area);
+        animateIn(area);
     }
-};
-
-window.svTkt = (e) => { e.preventDefault(); let db = getDB(); db.tickets.push({ id: Date.now(), user_id: STATE.user.id, user_name: STATE.user.ism, message: document.getElementById('m-desc').value, status: 'Ochiq', replies: [] }); saveDB(db); cModal(); renderView('support'); showToast('So`rov tushdi'); };
-window.svReply = (e) => {
-    e.preventDefault();
-    let db = getDB();
-    let t = db.tickets.find(x => x.id === STATE.activeTicketId);
-    if (t) {
-        t.replies.push({ id: Date.now(), user_id: STATE.user.id, user_name: STATE.user.ism, text: document.getElementById('reply-text').value });
-        saveDB(db);
-        oModal('view-tkt', t.id);
-        if (STATE.view === 'support') renderView('support');
-    }
-};
-window.changeTktStatus = (id, st) => { let db = getDB(); let t = db.tickets.find(x => x.id === id); if (t) { t.status = st; saveDB(db); showToast('Holat: ' + st); renderView('support'); } };
-
-// ======================== OTHERS (Posts, etc) ========================
-const v_posts = () => {
-    const db = getDB();
-    // Requirement: Show only approved posts (but allow authors/admins to see pending ones too for management)
-    const posts = (db.posts || []).filter(p => p.status === 'approved' || p.authorId === STATE.user.id || ['admin', 'director', 'ustoz', 'student'].includes(STATE.user.role)).reverse();
-    const r = STATE.user.role;
-
-    return `
-    <div class="max-w-4xl mx-auto space-y-10 animate-fade pb-20">
-        <div class="flex justify-between items-center bg-white p-8 rounded-[2.5rem] shadow-premium">
-            <div>
-                <h2 class="text-4xl font-black text-slate-800 mb-1">Yangiliklar</h2>
-                <p class="text-slate-400 font-bold uppercase tracking-widest text-xs">Platforma hayoti va yangiliklari</p>
-            </div>
-            ${STATE.user.role === 'admin' || STATE.user.role === 'ustoz' ? `
-            <button onclick="oModal('add-post')" class="bg-indigo-600 text-white p-5 rounded-2xl shadow-xl shadow-indigo-200 hover:scale-105 active:scale-95 transition-all">
-                <i data-lucide="plus" class="w-6 h-6"></i>
-            </button>` : ''}
-        </div>
-        <div class="space-y-8">
-            ${posts.map(p => {
-                const comments = p.comments || [];
-                return `
-                <article class="glass-card overflow-hidden rounded-[3rem] border-none group bg-white">
-                    ${p.image ? `
-                    <div class="relative h-72 overflow-hidden cursor-zoom-in" onclick="zoomImage({src: '${p.image}'})">
-                        <img src="${p.image}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700">
-                        <div class="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-8">
-                            <span class="text-white font-black text-lg flex items-center gap-2"><i data-lucide="maximize-2"></i> Kattalashtirish</span>
-                        </div>
-                    </div>` : ''}
-                    <div class="p-10 space-y-6 relative">
-                        ${!p.approved ? '<span class="absolute top-6 right-6 px-3 py-1 bg-amber-100 text-amber-600 text-[10px] font-black uppercase rounded-lg">Kutilyapti</span>' : ''}
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-4">
-                                <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-black">${p.author?.[0] || 'A'}</div>
-                                <div>
-                                    <p class="font-black text-slate-800">${p.author || 'Admin'}</p>
-                                    <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">${p.date || 'Bugun'}</p>
-                                </div>
-                            </div>
-                            ${(p.authorId === STATE.user.id || r === 'admin') ? `
-                                <button onclick="dlPost(${p.id})" class="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all">
-                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                </button>
-                            ` : ''}
-                        </div>
-                        <h3 class="text-3xl font-black text-slate-800 group-hover:text-indigo-600 transition-colors">${p.title || 'Sarlavhasiz post'}</h3>
-                        <p class="text-slate-600 text-lg leading-relaxed font-medium whitespace-pre-wrap">${p.content || p.text || ''}</p>
-                        
-                        <div class="pt-6 border-t border-slate-50">
-                            <div class="flex items-center justify-between mb-6">
-                                <button onclick="toggleLike(${p.id}, this)" class="flex items-center gap-2 font-black text-sm ${p.liked_users?.includes(STATE.user.id) ? 'text-pink-500' : 'text-slate-400'} hover:text-pink-500 transition-colors">
-                                    <i data-lucide="heart" class="w-5 h-5 ${p.liked_users?.includes(STATE.user.id) ? 'fill-current' : ''}"></i>
-                                    <span class="like-counter">${p.likes || 0}</span>
-                                </button>
-                                <div class="flex items-center gap-2 text-slate-400 font-black text-sm">
-                                    <i data-lucide="message-circle" class="w-5 h-5"></i>
-                                    <span>${comments.length} Fikrlar</span>
-                                </div>
-                            </div>
-
-                            <!-- Comments Section -->
-                            <div class="space-y-4 mb-6">
-                                ${comments.map(c => `
-                                    <div class="flex gap-4 p-4 bg-slate-50/50 rounded-2xl group/c relative">
-                                        <div class="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center font-black text-xs shrink-0">${c.userName[0]}</div>
-                                        <div class="flex-1">
-                                            <div class="flex justify-between">
-                                                <p class="text-xs font-black text-slate-800">${c.userName}</p>
-                                                <p class="text-[9px] font-bold text-slate-400">${c.time}</p>
-                                            </div>
-                                            <p class="text-xs text-slate-600 font-medium mt-1">${c.text}</p>
-                                        </div>
-                                        ${(c.userId === STATE.user.id || r === 'admin') ? `
-                                            <button onclick="deleteComment(${p.id}, ${c.id})" class="absolute top-2 right-2 opacity-0 group-hover/c:opacity-100 p-1.5 text-red-300 hover:text-red-500 transition-all">
-                                                <i data-lucide="x" class="w-3 h-3"></i>
-                                            </button>
-                                        ` : ''}
-                                    </div>
-                                `).join('')}
-                            </div>
-
-                            <!-- Add Comment -->
-                            <form onsubmit="addComment(event, ${p.id})" class="relative">
-                                <input type="text" placeholder="Fikr qoldiring..." class="w-full bg-slate-50 border-none px-6 py-4 rounded-2xl font-semibold text-sm outline-none focus:ring-2 ring-indigo-100 transition-all pr-16" id="comment-input-${p.id}">
-                                <button class="absolute right-2 top-1/2 -translate-y-1/2 p-3 bg-indigo-600 text-white rounded-xl shadow-lg hover:scale-110 active:scale-95 transition-all">
-                                    <i data-lucide="send" class="w-4 h-4"></i>
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </article>`;
-            }).join('')}
-            ${posts.length === 0 ? '<div class="text-center py-20 bg-white rounded-[3rem] border border-dashed border-slate-200"><p class="text-slate-400 font-black text-xl">Hozircha postlar yo\'q</p></div>' : ''}
-        </div>
-    </div>`;
-};
-
-window.addComment = (e, postId) => {
-    e.preventDefault();
-    const input = document.getElementById(`comment-input-${postId}`);
-    const text = input.value.trim();
-    if (!text) return;
-
-    let db = getDB();
-    const p = db.posts.find(x => x.id === postId);
-    if (p) {
-        p.comments = p.comments || [];
-        const now = new Date();
-        const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-        p.comments.push({
-            id: Date.now(),
-            userId: STATE.user.id,
-            userName: STATE.user.ism,
-            text,
-            time
-        });
-        saveDB(db);
-        input.value = '';
-        renderView('posts');
-        showToast("Fikringiz saqlandi!");
-    }
-};
-
-window.deleteComment = (postId, commentId) => {
-    if (!confirm("Fikrni o'chirmoqchimisiz?")) return;
-    let db = getDB();
-    const p = db.posts.find(x => x.id === postId);
-    if (p) {
-        p.comments = p.comments.filter(c => c.id !== commentId);
-        saveDB(db);
-        renderView('posts');
-        showToast("Fikr o'chirildi", "info");
-    }
-};
-window.dlPost = id => { let db = getDB(); db.posts = db.posts.filter(x => x.id !== id); saveDB(db); renderView('posts'); showToast('Ochrildi', 'error'); }
-
-window.toggleLike = (id, btn) => {
-    let db = getDB();
-    let p = db.posts.find(x => x.id === id);
-    if (p) {
-        p.liked_users = p.liked_users || [];
-        let liked = p.liked_users.includes(STATE.user.id);
-        if (liked) {
-            p.liked_users = p.liked_users.filter(u => u !== STATE.user.id);
-            p.likes = Math.max(0, p.likes - 1);
-        } else {
-            p.liked_users.push(STATE.user.id);
-            p.likes++;
-        }
-        saveDB(db);
-
-        // Instant UI update
-        const countSpan = btn.querySelector('.like-counter');
-        const icon = btn.querySelector('svg');
-        countSpan.innerText = p.likes;
-        if (!liked) {
-            btn.classList.add('!text-pink-500');
-            icon.classList.add('fill-current', 'scale-125');
-            setTimeout(() => icon.classList.remove('scale-125'), 150);
-        } else {
-            btn.classList.remove('!text-pink-500');
-            icon.classList.remove('fill-current');
-        }
-    }
+    updateNotifBadges();
 }
 
-// ======================== FULLY WORKING EXTRA VIEWS ========================
-const v_lead = () => {
-    const db = getDB();
-    const allStudents = db.users.filter(x => x.role === 'student').sort((a, b) => b.points - a.points);
-    const myGroupId = STATE.user.groupId;
-    const myGroup = (db.groups||[]).find(g => g.id === myGroupId);
-    const groupStudents = myGroupId ? allStudents.filter(s => s.groupId === myGroupId) : allStudents;
-
-    // Weekly tournament: top group by total XP
-    const groupTotals = (db.groups||[]).map(g => ({
-        ...g,
-        totalXP: db.users.filter(u => u.groupId === g.id && u.role==='student').reduce((s,u)=>s+(u.points||0),0)
-    })).sort((a,b)=>b.totalXP-a.totalXP);
-
-    const medalColors = ['text-yellow-500','text-slate-400','text-amber-600'];
-    const medalIcons = ['🥇','🥈','🥉'];
-
-    return `<div class="max-w-5xl mx-auto space-y-10 animate-fade">
-    <div class="text-center">
-        <h1 class="text-4xl font-black text-slate-800 mb-2">${t('leaderboard')}</h1>
-        <p class="text-slate-400 font-bold uppercase tracking-widest text-xs">${'Reyting va turnirlar'}</p>
-    </div>
-
-    <!-- Group Tournament Leaderboard -->
-    <div class="glass-card p-8 rounded-[2.5rem] bg-white shadow-premium">
-        <h2 class="text-xl font-black mb-6 flex items-center gap-2">
-            <i data-lucide="trophy" class="text-yellow-500 w-6 h-6"></i>
-            ${'Guruhlar Musobaqasi'}
-            <span class="ml-auto text-xs font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-xl uppercase tracking-widest">${'XP bo\'yicha'}</span>
-        </h2>
-        <div class="space-y-3">
-        ${groupTotals.map((g,i) => `
-            <div class="flex items-center gap-4 p-4 rounded-2xl transition-all ${ i===0?'bg-yellow-50 border-2 border-yellow-200':'bg-slate-50 border border-slate-100'} hover:shadow-md">
-                <span class="text-3xl w-10 text-center">${medalIcons[i]||i+1}</span>
-                <div class="flex-1">
-                    <p class="font-black text-slate-800">${g.name}</p>
-                    <p class="text-[10px] font-bold text-slate-400 uppercase">${g.studentIds.length} ${"o'quvchi"}</p>
-                </div>
-                <div class="text-right">
-                    <p class="font-black text-indigo-700 text-xl">${g.totalXP}</p>
-                    <p class="text-[10px] font-bold text-slate-400">XP</p>
-                </div>
-                ${i===0?'<span class="px-3 py-1 bg-yellow-400 text-white rounded-xl text-[10px] font-black uppercase">🏆 TOP</span>':''}
-            </div>`).join('')}
-        </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-    <!-- My Group Leaderboard -->
-    <div class="glass-card p-8 rounded-[2.5rem] bg-white shadow-premium">
-        <h2 class="text-lg font-black mb-6 flex items-center gap-2">
-            <i data-lucide="users" class="text-indigo-600 w-5 h-5"></i>
-            ${myGroup ? myGroup.name : ("Mening guruhim")}
-        </h2>
-        <div class="space-y-3">
-        ${groupStudents.map((x,i) => `
-            <div class="flex items-center gap-3 p-3 rounded-2xl transition-all ${ x.id===STATE.user.id ? 'bg-indigo-50 border-2 border-indigo-200':'hover:bg-slate-50'}">
-                <span class="font-black text-slate-300 w-6 text-center">${i+1}</span>
-                <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex justify-center items-center font-black overflow-hidden">
-                    ${x.avatar ? `<img src="${x.avatar}" class="w-full h-full object-cover">` : x.ism[0]}
-                </div>
-                <span class="flex-1 font-bold text-slate-800 ${ x.id===STATE.user.id?'text-indigo-700':''} truncate">${x.ism} ${ x.id===STATE.user.id?'<span class="text-[9px] text-indigo-400 font-black">(Sen)</span>':''}</span>
-                <span class="font-black text-indigo-600">${x.points} XP</span>
-            </div>`).join('')}
-        ${groupStudents.length===0?`<p class="text-slate-400 font-bold text-center py-8">${"Talabalar yo'q"}</p>`:''}
-        </div>
-    </div>
-
-    <!-- Global Top 10 -->
-    <div class="glass-card p-8 rounded-[2.5rem] bg-white shadow-premium">
-        <h2 class="text-lg font-black mb-6 flex items-center gap-2">
-            <i data-lucide="globe" class="text-emerald-500 w-5 h-5"></i>
-            ${'Umumiy Reyting'}
-        </h2>
-        <div class="space-y-3">
-        ${allStudents.slice(0,10).map((x,i) => `
-            <div class="flex items-center gap-3 p-3 rounded-2xl hover:bg-slate-50 transition-all ${ x.id===STATE.user.id?'bg-indigo-50 border border-indigo-200':''}">
-                <span class="font-black ${medalColors[i]||'text-slate-300'} w-6 text-center text-lg">${medalIcons[i]||i+1}</span>
-                <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex justify-center items-center font-black overflow-hidden">
-                    ${x.avatar ? `<img src="${x.avatar}" class="w-full h-full object-cover">` : x.ism[0]}
-                </div>
-                <span class="flex-1 font-bold text-slate-800 truncate">${x.ism}</span>
-                <span class="font-black text-indigo-600">${x.points} XP</span>
-            </div>`).join('')}
-        </div>
-    </div>
-    </div>
-    </div>`;
-};
-const v_sup = () => {
-    const db = getDB();
-    const myTickets = STATE.user.role === 'admin' ? db.tickets : db.tickets.filter(t => t.user_id === STATE.user.id);
-    myTickets.reverse();
-
-    return `<div class="max-w-4xl mx-auto"><h1 class="text-3xl font-black text-slate-800 mb-8">Yordam Markazi</h1>
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div class="lg:col-span-1">
-            <div class="glass-card p-6 rounded-3xl bg-white text-center hover:shadow-xl transition-shadow tilt-card mb-6 border border-slate-100">
-                <div class="w-16 h-16 bg-indigo-50 rounded-2xl mx-auto flex items-center justify-center mb-4"><i data-lucide="help-circle" class="w-8 h-8 text-indigo-600"></i></div>
-                <h2 class="text-xl font-bold text-slate-800 mb-2">Yordam kerakmi?</h2>
-                <p class="text-slate-500 mb-6 font-medium text-sm">Savol va muammolaringizni yozib qoldiring, biz tez orada javob beramiz.</p>
-                <button onclick="oModal('add-tkt')" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black py-3 rounded-xl shadow-lg shadow-indigo-600/30 transition-all">Yangi So'rov</button>
-            </div>
-        </div>
-        <div class="lg:col-span-2 space-y-4">
-            <h2 class="text-xl font-black text-slate-800 mb-4 px-2">Sizning so'rovlaringiz</h2>
-            ${myTickets.length ? myTickets.map(t => {
-        let statusColor = t.status === 'Ochiq' ? 'bg-amber-100 text-amber-700' : (t.status === 'Jarayonda' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700');
-        let unread = t.replies.length > 0 && t.replies[t.replies.length - 1].user_id !== STATE.user.id;
-        return `<div class="p-5 bg-white border border-slate-200 rounded-2xl shadow-sm hover:shadow-lg transition-all cursor-pointer flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center relative ${unread ? 'border-l-4 border-l-indigo-600' : ''}" onclick="oModal('view-tkt', ${t.id})">
-                    <div class="flex-1">
-                        <div class="flex items-center gap-3 mb-1">
-                            <span class="font-black text-slate-800">#${t.id}</span>
-                            <span class="text-xs font-black px-2 py-1 rounded-lg ${statusColor}">${t.status}</span>
-                            ${STATE.user.role === 'admin' ? `<span class="text-xs font-bold text-slate-400">@${t.user_name}</span>` : ''}
-                        </div>
-                        <p class="text-sm font-medium text-slate-500 line-clamp-1">${t.message}</p>
-                    </div>
-                    <div class="flex items-center gap-2 text-slate-400 font-bold text-sm bg-slate-50 px-3 py-1.5 rounded-xl">
-                        <i data-lucide="message-circle" class="w-4 h-4"></i> ${t.replies.length}
-                    </div>
-                </div>`;
-    }).join('') : '<div class="text-center p-10 bg-white border border-slate-200 rounded-[2rem]"><p class="text-slate-500 font-medium">Hozircha so`rovlar yo`q.</p></div>'}
-        </div>
-    </div></div>`;
-};
-const v_users = () => {
-    return `
-    <div class="max-w-6xl mx-auto">
-        <h1 class="text-3xl font-black text-slate-800 mb-8">Foydalanuvchilar Boshqaruvi</h1>
-        <div class="glass-card rounded-[2.5rem] bg-white overflow-hidden border border-slate-100 shadow-xl">
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="bg-slate-50/50 border-b border-slate-100 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                            <th class="p-6">Foydalanuvchi</th>
-                            <th class="p-6">Email va Ball</th>
-                            <th class="p-6">Rol Ozgartirish</th>
-                            <th class="p-6 text-right">Amallar</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-50">
-                        ${getDB().users.map(u => `
-                            <tr class="hover:bg-indigo-50/30 transition-colors group">
-                                <td class="p-6">
-                                    <div class="flex items-center gap-4">
-                                        <div class="w-12 h-12 rounded-2xl bg-slate-100 font-black text-indigo-600 flex items-center justify-center group-hover:bg-white transition-colors">
-                                            ${u.avatar ? `<img src="${u.avatar}" class="w-full h-full object-cover rounded-2xl">` : u.ism[0]}
-                                        </div>
-                                        <div>
-                                            <p class="font-extrabold text-slate-800">${u.ism}</p>
-                                            <p class="text-xs font-black uppercase tracking-widest text-indigo-500 mt-1">${u.role.replace('_', ' ')}</p>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="p-6">
-                                    <p class="text-slate-500 font-bold text-sm">${u.email}</p>
-                                    <p class="text-xs font-black text-emerald-500 mt-1"><i data-lucide="zap" class="w-3 h-3 inline"></i> ${u.points} Ball</p>
-                                </td>
-                                <td class="p-6">
-                                    <select onchange="changeRole(${u.id}, this.value)" class="bg-slate-50 border border-slate-100 text-xs font-black uppercase tracking-widest px-4 py-2 rounded-xl outline-none focus:ring-2 ring-indigo-100 transition-all cursor-pointer">
-                                        <option value="student" ${u.role === 'student' ? 'selected' : ''}>Student</option>
-                                        <option value="ustoz" ${u.role === 'ustoz' ? 'selected' : ''}>Ustoz</option>
-                                        <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
-                                        <option value="tech_admin" ${u.role === 'tech_admin' ? 'selected' : ''}>Tech Admin</option>
-                                        <option value="director" ${u.role === 'director' ? 'selected' : ''}>Director</option>
-                                    </select>
-                                </td>
-                                <td class="p-6 text-right">
-                                    <button onclick="banUser(${u.id})" class="w-10 h-10 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all flex items-center justify-center ml-auto border border-red-100">
-                                        <i data-lucide="user-minus" class="w-5 h-5"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>`;
-};
-window.changeRole = (id, newRole) => {
-    let db = getDB();
-    let u = db.users.find(x => x.id === id);
-    if (u) {
-        u.role = newRole;
-        saveDB(db);
-        showToast(`${u.ism} roli ${newRole}ga o'zgardi`);
-        renderView('users');
-    }
+// ─── "Kutilmoqda" eshigi: status pending/rejected ─────────────────────
+function isAwaitingApproval() {
+    const s = STATE.user?.status;
+    return s === 'pending' || s === 'rejected';
 }
-window.banUser = id => {
-    if (id === STATE.user.id) { showToast('O\'zingizni o\'chira olmaysiz!', 'error'); return; }
-    if (!confirm('Haqiqatdan ham ushbu foydalanuvchini platformadan chetlatmoqchimisiz?')) return;
-    let db = getDB();
-    db.users = db.users.filter(x => x.id !== id);
-    saveDB(db);
-    showToast('Foydalanuvchi tizimdan o\'chirildi', 'error');
-    renderView('users');
-};
 
-// ======================== GROUPS & ATTENDANCE ========================
-const v_groups = () => {
-    const db = getDB();
-    const r = STATE.user.role;
-    let groups = [];
-    if (r === 'admin' || r === 'tech_admin') groups = db.groups || [];
-    else if (r === 'ustoz') groups = (db.groups || []).filter(g => g.ustozId === STATE.user.id);
-
+function pendingGate() {
+    const u = STATE.user || {};
+    const rejected = u.status === 'rejected';
     return `
-    <div class="flex justify-between items-center mb-8">
-        <h1 class="text-3xl font-black text-slate-800">Guruhlar Boshqaruvi</h1>
-        ${r === 'admin' ? `<button onclick="oModal('add-group')" class="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold btn-interactive shadow-lg shadow-indigo-600/20">Yangi Guruh</button>` : ''}
-    </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        ${groups.map(g => {
-            const ustoz = db.users.find(u => u.id === g.ustozId);
-            return `
-            <div class="glass-card p-6 rounded-[2rem] tilt-card cursor-pointer" onclick="oModal('view-group-attendance', ${g.id})">
-                <div class="flex justify-between items-start mb-4">
-                    <div class="w-12 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center font-black">${g.name[0]}</div>
-                    <span class="text-[10px] font-black uppercase tracking-widest bg-indigo-50 text-indigo-600 px-3 py-1 rounded-lg">${(g.studentIds || []).length} O'quvchi</span>
-                </div>
-                <h3 class="font-black text-slate-800 text-xl mb-1">${g.name}</h3>
-                <p class="text-xs font-bold text-slate-400 mb-4 uppercase tracking-tighter flex items-center gap-2">USTOZ: ${ustoz ? ustoz.ism : 'Tayinlanmagan'}
-                    ${r === 'admin' ? `
-                    <select onchange="event.stopPropagation(); assignUstozToGroup(${g.id}, this.value)" class="bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none ml-auto text-slate-800 cursor-pointer">
-                        <option value="" disabled selected>O'zgartirish</option>
-                        ${db.users.filter(u => u.role === 'ustoz').map(u => `<option value="${u.id}">${u.ism}</option>`).join('')}
-                    </select>` : ''}
-                </p>
-                <div class="pt-4 border-t border-slate-50 flex justify-between items-center">
-                    <span class="text-xs font-black text-indigo-600">DAVOMATNI KO'RISH</span>
-                    <i data-lucide="chevron-right" class="w-4 h-4 text-slate-300"></i>
-                </div>
-            </div>`;
-        }).join('')}
+    <div class="gate">
+        <div class="gate-card">
+            <div class="gate-glow"></div>
+            <div class="gate-icon">${rejected ? '🚫' : '⏳'}</div>
+            <h1 class="t-2xl fw-9 mt-4">${rejected ? 'Ariza rad etildi' : 'Tasdiqlash kutilmoqda'}</h1>
+            <p class="c-muted mt-3" style="max-width:32rem;margin-inline:auto">
+                ${rejected
+                    ? 'Afvuz, admingiz arizangizni rad etdi. Savollaringiz bo‘lsa, kollej administratoriga murojaat qiling.'
+                    : 'Ro‘yxatdan o‘tdingiz! Administrator hisobingizni tasdiqlashini kutilmoqda. Tasdiqlangach barcha bo‘limlar ochiladi.'}
+            </p>
+            <div class="gate-info">
+                <div><i data-lucide="user"></i><span>${esc(u.ism || '')}</span></div>
+                <div><i data-lucide="mail"></i><span>${esc(u.email || '')}</span></div>
+                <div><i data-lucide="shield-check"></i><span>${esc(roleLabel(u.role))}</span></div>
+            </div>
+            <div class="d-flex gap-2 justify-center mt-6 flex-wrap">
+                <button class="btn btn-outline" onclick="window.__refreshStatus()">
+                    <i data-lucide="refresh-cw"></i> Holatni tekshirish
+                </button>
+                <button class="btn btn-primary" onclick="window.logout()">
+                    <i data-lucide="log-out"></i> Chiqish
+                </button>
+            </div>
+            <div class="gate-note"><i data-lucide="clock"></i> Tasdiqlash odatda bir necha daqiqa ichida amalga oshadi</div>
+        </div>
     </div>`;
 }
 
-const v_attendance = () => {
-    const db = getDB();
-    const u = STATE.user;
-    const r = u.role;
+window.__refreshStatus = async () => {
+    const btn = document.querySelector('#dynamic-view-area .btn-outline');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Tekshirilmoqda…'; safeLucide(btn); }
+    const u = await loadUserData();
+    if (u && !isAwaitingApproval()) {
+        showToast('Hisobingiz tasdiqlandi! Xush kelibsiz 🎉', 'success');
+        window.location.hash = DASHBOARD_VIEW[u.role] || 'courses';
+        renderView(DASHBOARD_VIEW[u.role] || 'courses');
+    } else if (u?.status === 'rejected') {
+        showToast('Ariza rad etildi', 'error');
+        renderView(STATE.view || 'home');
+    } else {
+        showToast('Hali tasdiqlanmagan', 'info');
+        renderView(STATE.view || 'home');
+    }
+};
 
-    if (r === 'student') {
-        const myAtt = (db.attendance || []).filter(a => a.groupId === u.groupId).reverse();
-        const presentCount = myAtt.filter(a => a.records[u.id] === 'present').length;
-        const totalCount = myAtt.length;
-        const percent = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+/**
+ * Некоторые разделы сначала рисуют «каркас», а данные подгружают отдельно —
+ * иначе контейнер остаётся пустым. Здесь запускаем их после вставки HTML.
+ */const AFTER_RENDER = {
+    courses: () => loadCoursesGrid(),
+    posts: () => loadPosts(),
+    support: () => loadTickets(),
+    chat: () => loadChat('group'),
+    'staff-chat': () => loadChat('staff'),
+    attendance: () => { if (isStaff()) window.__loadAttendance(); },
+    grades: () => { if (['ustoz', 'admin', 'tech_admin'].includes(STATE.user?.role)) window.__loadGradePanel(); },
+};
 
-        return `
-        <div class="max-w-4xl mx-auto space-y-10 animate-fade">
-            <header class="flex justify-between items-center p-8 bg-white rounded-[2.5rem] shadow-premium">
+function runAfterRender(view) {
+    const fn = AFTER_RENDER[view];
+    if (fn) {
+        try { fn(); }
+        catch (e) { console.warn('[after-render]', view, e); }
+    }
+}
+
+async function handleRoute() {
+    const hash = (window.location.hash || '').replace('#', '') || (STATE.user ? DASHBOARD_VIEW[STATE.user.role] : 'home');
+    await renderView(hash);
+}
+
+function updateNotifBadges() {
+    document.querySelectorAll('[data-notif-badge]').forEach(b => {
+        const n = STATE.notifCount || 0;
+        b.classList.toggle('hidden', n === 0);
+        b.textContent = n > 99 ? '99+' : String(n);
+    });
+}
+
+async function refreshNotifications() {
+    if (!STATE.user) return;
+    try {
+        const list = await getNotifications();
+        STATE.notifCount = (list || []).filter(n => !n.seen).length;
+        updateNotifBadges();
+    } catch (e) { /* silent — badge is non-critical */ }
+}
+window.refreshNotifications = refreshNotifications;
+
+// ══════════════════════════════════════════════════════════════════════
+//  Modals
+// ══════════════════════════════════════════════════════════════════════
+async function openLessonModal(lessonId) {
+    const courses = await getCourses();
+    let lesson = null, course = null;
+    for (const c of courses) {
+        const l = (c.lessons || []).find(x => x.id === Number(lessonId));
+        if (l) { lesson = l; course = c; break; }
+    }
+    if (!lesson) { showToast('Dars topilmadi', 'error'); return; }
+
+    const done = courseCompleted(course).includes(lesson.id);
+    const siblings = course.lessons || [];
+    const hasVideo = !!lesson.videoUrl;
+    const mins = LESSON_NEEDED_SEC / 60;
+    TIMER.unlockedFor = done ? lesson.id : null;
+    window.__videoUrls = window.__videoUrls || {};
+    if (hasVideo) window.__videoUrls[lesson.id] = lesson.videoUrl;
+
+    openModal(modalShell({
+        icon: '<i data-lucide="play-circle"></i>',
+        title: esc(lesson.title),
+        sub: course.title,
+        body: `
+            <div class="stack">
+                ${!done ? `
+                <div class="callout blue">
+                    <i data-lucide="info"></i>
+                    <div>Video <b>${mins} daqiqa</b> davomida darsni ko‘rib turishdan keyin ochiladi.
+                    Timer brauzerni yopsangiz ham to‘xtaydi — oynani yopmang.</div>
+                </div>` : `
+                <div class="callout green">
+                    <i data-lucide="check-circle-2"></i>
+                    <div>Bu dars siz tomonidan <b>yakunlangan</b>. Video ochiq, qayta ko‘rishingiz mumkin.</div>
+                </div>`}
+
+                ${!done ? `
+                <div class="timer-box" id="timer-box">
+                    <div class="timer-ring-wrap">
+                        <svg class="timer-ring" viewBox="0 0 48 48">
+                            <circle class="bg" cx="24" cy="24" r="20"></circle>
+                            <circle class="fg" id="timer-ring" cx="24" cy="24" r="20"
+                                    style="stroke:var(--primary)"></circle>
+                        </svg>
+                        <div class="timer-text" id="timer-text">00:00</div>
+                    </div>
+                    <div class="grow">
+                        <div class="fw-8" style="font-size:.875rem">Darsni ko‘rish vaqti</div>
+                        <div class="timer-msg" id="timer-msg">Video ochilishi uchun <b>${mins} daqiqa</b> qoldi.</div>
+                        <div class="lesson-xp-chip" id="lesson-xp"><i data-lucide="zap"></i></div>
+                    </div>
+                </div>` : ''}
+
+                ${hasVideo ? `
+                <div class="video-holder" id="video-holder" ${done ? 'data-ready="1"' : ''}>
+                    ${done ? `<iframe src="${esc(lesson.videoUrl)}" allowfullscreen
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture"
+                            title="${esc(lesson.title)}"></iframe>` : ''}
+                </div>
+                ${done ? '' : `
+                <div class="video-lock" id="video-lock">
+                    <div class="video-lock-blur"></div>
+                    <div class="video-lock-body">
+                        <div class="video-lock-icon"><i data-lucide="lock"></i></div>
+                        <b>Video yopiq</b>
+                        <span>Darsni <span class="video-lock-left">${String(mins).padStart(2, '0')}:00</span> davomida
+                              ko‘rib turing — video avtomatik ochiladi</span>
+                    </div>
+                </div>`}`
+                : lesson.content ? `<div class="callout amber"><i data-lucide="file-text"></i><div>Bu darsda video yo‘q, faqat o‘qish materiali bor.</div></div>` : ''}
+
+                ${lesson.topic ? `<div class="badge badge-orange">${esc(lesson.topic)}</div>` : ''}
+                ${lesson.content ? `<div class="prose">${esc(lesson.content)}</div>` : ''}
+
+                ${siblings.length > 1 ? `
                 <div>
-                    <h1 class="text-4xl font-black text-slate-800">Davomat Tarixi</h1>
-                    <p class="text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-1">Sizning platformadagi faolligingiz</p>
-                </div>
-                <div class="flex items-center gap-4 bg-emerald-50 text-emerald-600 px-6 py-3 rounded-2xl">
-                    <i data-lucide="check-circle"></i>
-                    <span class="font-black text-xl">${percent}%</span>
-                </div>
-            </header>
+                    <div class="fw-8 mb-2" style="font-size:.875rem">Kurs boshqa darslari</div>
+                    <div class="list list-soft">
+                        ${siblings.filter(l => l.id !== lesson.id).map(l => `
+                            <button class="list-row click w-full text-left" onclick="cModal(); setTimeout(()=>window.__openLesson(${l.id}),80)">
+                                <div class="card-icon navy sm" style="width:30px;height:30px"><i data-lucide="file-text"></i></div>
+                                <div class="grow">
+                                    <div class="list-title">${esc(l.title)}</div>
+                                </div>
+                                ${courseCompleted(course).includes(l.id) ? '<i data-lucide="check-circle-2" style="width:18px;height:18px;color:var(--green-600)"></i>' : ''}
+                            </button>`).join('')}
+                    </div>
+                </div>` : ''}
+            </div>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Yopish</button>
+            <button class="btn btn-success" id="timer-btn" onclick="window.__completeLesson(${lesson.id})" ${done ? '' : 'disabled'}>
+                <i data-lucide="check"></i> ${done ? 'Qayta ko‘rish' : 'Darsni yakunlash'}
+            </button>`,
+    }), 'lg');
 
-            <div class="space-y-4">
-                ${myAtt.map((a, idx) => {
-                    const isPresent = a.records[u.id] === 'present';
-                    return `
-                    <div class="glass-card p-6 flex justify-between items-center group hover:bg-white hover:shadow-xl transition-all">
-                        <div class="flex items-center gap-6">
-                            <div class="w-12 h-12 bg-slate-50 text-slate-300 rounded-xl flex items-center justify-center font-black">${myAtt.length - idx}</div>
-                            <div>
-                                <p class="font-black text-slate-800 text-lg">${new Date(a.date).toLocaleDateString('uz-UZ', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-                                <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">${a.date}</p>
-                            </div>
-                        </div>
-                        <span class="px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest ${isPresent ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}">
-                            ${isPresent ? 'Keldi' : 'Kelmadi'}
-                        </span>
-                    </div>`;
-                }).join('')}
-                ${myAtt.length === 0 ? '<div class="py-20 text-center text-slate-300 font-black italic">Ma\'lumotlar topilmadi</div>' : ''}
-            </div>
-        </div>`;
+    if (done) {
+        const btn = document.getElementById('timer-btn');
+        if (btn) btn.onclick = () => cModal();
+    } else {
+        try { await startLessonTimer(lesson.id); } catch (e) { showToast(e.message, 'error'); }
     }
-
-    return `<div class="text-center py-20"><i data-lucide="info" class="w-16 h-16 text-indigo-200 mx-auto mb-4"></i><h2 class="text-2xl font-black text-slate-800">Guruhni tanlang</h2><p class="text-slate-400 font-bold mt-2">Davomatni boshqarish uchun avval guruhlarga o'ting.</p><button onclick="window.location.hash='groups'" class="mt-8 bg-indigo-600 text-white px-8 py-3 rounded-2xl font-black shadow-lg">Guruhlar</button></div>`;
 }
+window.openLessonModal = openLessonModal;
+// ══════════════════════════════════════════════════════════════════════
+//  Views: do'kon (ballar -> sovg'alar) va tasdiqlash
+// ══════════════════════════════════════════════════════════════════════
+const SHOP_TONES = ['blue', 'orange', 'violet', 'green', 'amber', 'pink'];
 
-const v_reports = () => {
-    const db = getDB();
-    const students = db.users.filter(u => u.role === 'student');
-    
-    return `
-    <h1 class="text-3xl font-black text-slate-800 mb-8">Davomat Hisoboti</h1>
-    <div class="glass-card p-8 rounded-[2.5rem] overflow-hidden shadow-premium">
-        <table class="w-full text-left">
-            <thead>
-                <tr class="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50">
-                    <th class="pb-6">O'quvchi</th>
-                    <th class="pb-6">Guruh</th>
-                    <th class="pb-6 text-center">Davomat %</th>
-                    <th class="pb-6 text-right">Amal</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-50">
-                ${students.map(s => {
-                    const g = (db.groups || []).find(x => x.id === s.groupId);
-                    const att = (db.attendance || []).filter(a => a.groupId === s.groupId);
-                    const pDays = att.filter(a => a.records[s.id] === 'present').length;
-                    const total = att.length;
-                    const percent = total > 0 ? Math.round((pDays / total) * 100) : 0;
-                    return `
-                    <tr>
-                        <td class="py-5 font-bold text-slate-800">${s.ism}</td>
-                        <td class="py-5 text-sm text-slate-500 font-bold">${g ? g.name : '-'}</td>
-                        <td class="py-5">
-                            <div class="flex flex-col items-center gap-1">
-                                <span class="text-xs font-black ${percent > 80 ? 'text-emerald-500' : 'text-amber-500'}">${percent}%</span>
-                                <div class="w-20 h-1 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-indigo-500" style="width: ${percent}%"></div></div>
-                            </div>
-                        </td>
-                        <td class="py-5 text-right">
-                            <button class="bg-slate-50 p-2 rounded-lg text-slate-400 hover:text-indigo-600 transition"><i data-lucide="eye" class="w-4 h-4"></i></button>
-                        </td>
+function shopHistoryCard(rows) {
+    if (!rows || !rows.length) return '';
+    return sectionCard('Xaridlarim', `
+        <div class="table-wrap">
+            <table class="table responsive">
+                <thead><tr><th data-label="Sovga">Sovga</th><th data-label="Narxi">Narxi</th><th data-label="Sana">Sana</th></tr></thead>
+                    <tbody>
+                        ${rows.map(r => {
+                            const d = r.createdAt ? new Date(r.createdAt) : null;
+                            const when = (d && !isNaN(d))
+                                ? d.toLocaleDateString('uz-UZ', { day: '2-digit', month: '2-digit', year: '2-digit' })
+                                  + ' ' + d.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' })
+                                : '—';
+                    return `<tr>
+                        <td data-label="Sovga"><span class="cell-main">${esc(r.title || '—')}</span></td>
+                        <td data-label="Narxi"><span class="shop-price"><i data-lucide="zap"></i> ${num(r.price)}</span></td>
+                        <td data-label="Sana"><span class="cell-sub">${when}</span></td>
                     </tr>`;
                 }).join('')}
             </tbody>
         </table>
-    </div>`;
+    </div>`, { actions: `<span class="badge badge-blue">${rows.length} ta</span>` });
 }
 
-// ======================== QUESTION MANAGEMENT ========================
-const v_questions_mgmt = () => {
-    const db = getDB();
-    const questions = db.questions || [];
-    
+async function v_shop() {
+    const items = await getShop();
+    const my = num(STATE.user?.points);
+    const canEdit = ['admin', 'tech_admin', 'director'].includes(STATE.user?.role);
+    const isBuyer = !canEdit;
+
+    // Tarix yuklanishi do‘kon ochilishini kechiktirmasligi kerak.
+    let history = [];
+    if (isBuyer) {
+        try { history = (await getMyPurchases()) || []; }
+        catch (e) { history = []; }
+    }
+
     return `
-    <div class="flex justify-between items-center mb-8">
-        <h1 class="text-3xl font-black text-slate-800">Savollar Boshqaruvi</h1>
-        <button onclick="oModal('add-question')" class="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-bold btn-interactive shadow-lg shadow-indigo-600/20 flex items-center gap-2">
-            <i data-lucide="plus" class="w-5 h-5"></i> Yangi Savol
-        </button>
-    </div>
-    
-    <div class="glass-card rounded-[2.5rem] bg-white overflow-hidden border border-slate-100 shadow-xl">
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-                <thead>
-                    <tr class="bg-slate-50/50 border-b border-slate-100 text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
-                        <th class="p-6">Savol</th>
-                        <th class="p-6">Turi va Qiyinchiligi</th>
-                        <th class="p-6">Variantlar</th>
-                        <th class="p-6 text-right">Amallar</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-50">
-                    ${questions.length === 0 ? `<tr><td colspan="4" class="p-10 text-center text-slate-400 font-bold">Savollar hali mavjud emas.</td></tr>` : 
-                    questions.map(q => `
-                        <tr class="hover:bg-indigo-50/30 transition-colors group">
-                            <td class="p-6 max-w-xs">
-                                <p class="font-extrabold text-slate-800 line-clamp-2">${q.questionText}</p>
-                                <p class="text-[10px] font-black text-indigo-500 mt-1 uppercase tracking-widest">ID: #${q.id}</p>
-                            </td>
-                            <td class="p-6">
-                                <div class="flex flex-col gap-1">
-                                    <span class="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-widest w-fit">${q.type.replace('_', ' ')}</span>
-                                    <span class="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-lg text-[10px] font-black uppercase tracking-widest w-fit">${q.difficulty}</span>
-                                </div>
-                            </td>
-                            <td class="p-6">
-                                <div class="grid grid-cols-2 gap-2 text-[10px] font-bold">
-                                    <div class="${q.correctAnswer === 'A' ? 'text-emerald-600' : 'text-slate-400'}">A: ${q.optionA}</div>
-                                    <div class="${q.correctAnswer === 'B' ? 'text-emerald-600' : 'text-slate-400'}">B: ${q.optionB}</div>
-                                    <div class="${q.correctAnswer === 'C' ? 'text-emerald-600' : 'text-slate-400'}">C: ${q.optionC}</div>
-                                    <div class="${q.correctAnswer === 'D' ? 'text-emerald-600' : 'text-slate-400'}">D: ${q.optionD}</div>
-                                </div>
-                            </td>
-                            <td class="p-6 text-right">
-                                <div class="flex justify-end gap-2">
-                                    <button onclick="oModal('edit-question', ${q.id})" class="w-9 h-9 bg-slate-100 text-slate-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all flex items-center justify-center border border-slate-200">
-                                        <i data-lucide="edit-3" class="w-4 h-4"></i>
-                                    </button>
-                                    <button onclick="deleteQuestion(${id = q.id})" class="w-9 h-9 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all flex items-center justify-center border border-red-100">
-                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    </div>`;
+        ${pageHead('Do‘kon', 'Ballarni sovg‘alarga almashtiring', `
+            <div class="d-flex gap-2 flex-wrap">
+                <span class="badge badge-orange"><i data-lucide="zap"></i> ${my} XP</span>
+                ${canEdit ? `<button class="btn btn-primary" onclick="window.__openShopEditor()"><i data-lucide="plus"></i> Tovar qo‘shish</button>` : ''}
+            </div>`)}
+
+        ${items.length === 0 ? emptyState('shopping-bag', 'Do‘kon bo‘sh', 'Tovarlarni administrator qo‘shadi.')
+            : `<div class="shop-grid">
+                ${items.map((it, idx) => {
+                    const tone = SHOP_TONES[idx % SHOP_TONES.length];
+                    const out = it.stock === 0;
+                    const afford = my >= it.price;
+                    return `
+                    <article class="shop-card tone-${tone}${it.active ? '' : ' off'}">
+                        <div class="shop-media">
+                            ${it.image
+                                ? `<img src="${esc(it.image)}" alt="${esc(it.title)}" loading="lazy">`
+                                : `<span class="shop-emoji">${esc(it.emoji || '🎁')}</span>`}
+                            ${out ? '<span class="shop-out">Tugagan</span>' : ''}
+                            ${it.owned ? `<span class="shop-owned"><i data-lucide="check"></i> ${it.owned} dona</span>` : ''}
+                        </div>
+                        <div class="shop-body">
+                            <h3 class="shop-title">${esc(it.title)}</h3>
+                            <p class="shop-desc clamp-2">${esc(it.description || 'Tavsif kiritilmagan')}</p>
+                            <div class="shop-foot">
+                                <span class="shop-price"><i data-lucide="zap"></i> ${num(it.price)}</span>
+                                ${it.stock ? `<span class="shop-stock">${it.stock} qoldi</span>` : '<span class="shop-stock">chekisiz</span>'}
+                            </div>
+                            ${isBuyer ? `
+                            <button class="btn ${afford && !out ? 'btn-primary' : 'btn-soft'} w-full mt-3"
+                                    ${out || !afford || !it.active ? 'disabled' : ''}
+                                    onclick="window.__buyShop(${it.id},this)">
+                                <i data-lucide="shopping-cart"></i>
+                                ${out ? 'Tugagan' : afford ? 'Sotib olish' : `Yana ${num(it.price - my)} XP kerak`}
+                            </button>`
+                                : `<div class="d-flex gap-2 mt-3">
+                                    <button class="btn btn-soft grow" onclick="window.__openShopEditor(${it.id})"><i data-lucide="pencil"></i></button>
+                                    <button class="btn-icon sm" onclick="window.__delShop(${it.id})" aria-label="O‘chirish"><i data-lucide="trash-2"></i></button>
+                                </div>`}
+                        </div>
+                    </article>`;
+                }).join('')}
+            </div>`}
+
+        <div id="shop-history" class="mt-6">${shopHistoryCard(history)}</div>`;
+}
+
+window.__buyShop = async (id, btn) => {
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Olib kelinmoqda…'; }
+    try {
+        const res = await buyItem(id);
+        STATE.user.points = res.points;
+        localStorage.setItem('lms_user', JSON.stringify(STATE.user));
+        updateHeaderUser();
+        showToast(res.message, 'success');
+        renderView('shop');
+    } catch (e) {
+        showToast(e.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="shopping-cart"></i> Sotib olish'; }
+    }
 };
 
-window.deleteQuestion = (id) => {
-    if (!confirm("Haqiqatdan ham ushbu savolni o'chirmoqchimisiz?")) return;
-    let db = getDB();
-    db.questions = db.questions.filter(q => q.id !== id);
-    saveDB(db);
-    showToast("Savol o'chirildi", "error");
-    renderView('questions_mgmt');
+window.__delShop = async (id) => {
+    if (!confirm('Tovarni o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/shop/${id}`); showToast('Tovar o‘chirildi', 'success'); renderView('shop'); }
+    catch (e) { showToast(e.message, 'error'); }
 };
 
-window.svQuestion = (e, id = null) => {
+window.__openShopEditor = async (id) => {
+    const items = id ? await getShop() : [];
+    const it = items.find(x => x.id === id) || {};
+    openModal(modalShell({
+        icon: '<i data-lucide="shopping-bag"></i>',
+        title: id ? 'Tovarni tahrirlash' : 'Yangi tovar',
+        body: `
+            <form id="form-shop" class="stack" data-id="${id || ''}" onsubmit="return window.__svShop(event)">
+                <div class="field"><label class="label">Nomi</label>
+                    <input class="input" name="title" required value="${esc(it.title || '')}" placeholder="O‘quv.uz futbolka"></div>
+                <div class="field"><label class="label">Tavsif</label>
+                    <textarea class="textarea" name="description" placeholder="Qisqacha izoh">${esc(it.description || '')}</textarea></div>
+                <div class="grid grid-2 gap-3">
+                    <div class="field"><label class="label">Narxi (XP)</label>
+                        <input class="input" name="price" type="number" min="0" required value="${num(it.price ?? 500)}"></div>
+                    <div class="field"><label class="label">Qoldi (0 = cheksiz)</label>
+                        <input class="input" name="stock" type="number" min="0" value="${num(it.stock ?? 10)}"></div>
+                </div>
+                <div class="grid grid-2 gap-3">
+                    <div class="field"><label class="label">Emoji (rasmsiz)</label>
+                        <input class="input" name="emoji" maxlength="4" value="${esc(it.emoji || '')}" placeholder="👕"></div>
+                    <div class="field"><label class="label">Rasm havolasi</label>
+                        <input class="input" name="image" value="${esc(it.image || '')}" placeholder="https://…"></div>
+                </div>
+                <label class="check"><input type="checkbox" name="active" ${it.active === false ? '' : 'checked'}>
+                    <span>Sotuvda (faqat shu holda ko‘rinadi)</span></label>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-shop').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash</button>`,
+    }));
+};
+
+window.__svShop = async (e) => {
     e.preventDefault();
-    let db = getDB();
-    const qData = {
-        id: id || Date.now(),
-        questionText: document.getElementById('mq-text').value.trim(),
-        optionA: document.getElementById('mq-a').value.trim(),
-        optionB: document.getElementById('mq-b').value.trim(),
-        optionC: document.getElementById('mq-c').value.trim(),
-        optionD: document.getElementById('mq-d').value.trim(),
-        correctAnswer: document.getElementById('mq-correct').value,
-        type: document.getElementById('mq-type').value,
-        difficulty: document.getElementById('mq-diff').value
+    const fd = new FormData(e.target);
+    const payload = {
+        title: fd.get('title'), description: fd.get('description'),
+        price: Number(fd.get('price') || 0), stock: Number(fd.get('stock') || 0),
+        emoji: (fd.get('emoji') || '').trim(), image: (fd.get('image') || '').trim(),
+        active: fd.get('active') === 'on',
+    };
+    const id = e.target.dataset.id;
+    try {
+        if (id) await api_patch(`/shop/${id}`, payload); else await api_post('/shop', payload);
+        showToast('Tovar saqlandi', 'success');
+        cModal();
+        renderView('shop');
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+// Yetkazib berilmagan hisoblar: "tasdiqlash" ekrani
+async function v_pending() {
+    const list = await getPendingUsers();
+    return `
+        ${pageHead('Tasdiqlash', `${list.length} ta foydalanuvchi kutilmoqda`, `
+            <button class="btn btn-outline" onclick="renderView('pending')"><i data-lucide="refresh-cw"></i> Yangilash</button>`)}
+
+        ${list.length === 0
+            ? emptyState('user-check', 'Hammasi tasdiqlangan', 'Yangi ro‘yxatdan o‘tgan foydalanuvchilar shu yerda paydo bo‘ladi.')
+            : `<div class="stack-sm">
+                ${list.map(u => `
+                <div class="card card-pad d-flex items-center gap-3" style="flex-wrap:wrap">
+                    <div class="avatar" style="width:44px;height:44px;font-size:1.05rem">${esc((u.ism || '?').charAt(0))}</div>
+                    <div class="grow" style="min-width:0">
+                        <div class="fw-8">${esc(u.ism)}</div>
+                        <div class="c-muted" style="font-size:.8125rem">${esc(u.email)} · ${esc(roleLabel(u.role))}</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" onclick="window.__setStatus(${u.id},'active')">
+                            <i data-lucide="check"></i> Tasdiqlash</button>
+                        <button class="btn btn-outline btn-sm" onclick="window.__setStatus(${u.id},'rejected')">
+                            <i data-lucide="x"></i> Rad etish</button>
+                    </div>
+                </div>`).join('')}
+            </div>`}`;
+}
+
+window.__setStatus = async (id, status) => {
+    try {
+        await setUserStatus(id, status);
+        showToast(status === 'active' ? 'Foydalanuvchi tasdiqlandi' : 'Foydalanuvchi rad etildi', 'success');
+        renderView('pending');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__openLesson = (id) => { closeSidebar(); openLessonModal(id); };
+window.__completeLesson = async (id) => {
+    const btn = document.getElementById('timer-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Yuborilmoqda…'; }
+    try { await completeLessonServer(id); cModal(); } catch (e) {
+        showToast(e.message, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="check"></i> Darsni yakunlash'; }
+    }
+};
+
+async function openTicketModal(ticketId) {
+    STATE.activeTicketId = ticketId;
+    const tickets = await getTickets();
+    const t = tickets.find(x => x.id === Number(ticketId));
+    if (!t) { showToast('Ticket topilmadi', 'error'); return; }
+
+    const canReply = t.user_id === STATE.user.id || canManage() || STATE.user.role === 'director';
+
+    openModal(modalShell({
+        icon: '<i data-lucide="life-buoy"></i>',
+        title: `Ticket #${t.id}`,
+        body: `
+            <div class="stack">
+                <div class="list-soft">
+                    <div class="d-flex items-center justify-between gap-2 mb-2">
+                        <span class="badge ${t.status === 'Yopilgan' ? 'badge-green' : 'badge-amber'}">${esc(t.status)}</span>
+                        <span class="t-xs c-soft fw-6">${esc(t.user_name || '')}</span>
+                    </div>
+                    <div class="prose" style="font-size:.9375rem">${esc(t.message)}</div>
+                </div>
+
+                <div>
+                    <div class="fw-8 mb-2" style="font-size:.875rem">Javoblar (${(t.replies || []).length})</div>
+                    <div class="list" style="border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden">
+                        ${(t.replies || []).length === 0
+                            ? `<div class="list-row"><span class="c-soft t-sm">Hali javob yo‘q</span></div>`
+                            : t.replies.map(r => `
+                            <div class="list-row items-start">
+                                ${avatarHtml({ ism: r.user_name }, 'avatar-xs')}
+                                <div class="grow">
+                                    <div class="d-flex items-center gap-2">
+                                        <span class="list-title" style="font-size:.8125rem">${esc(r.user_name)}</span>
+                                        ${r.user_id === STATE.user.id ? '<span class="badge badge-blue">siz</span>' : ''}
+                                    </div>
+                                    <div class="t-sm c-muted" style="white-space:pre-wrap">${esc(r.text)}</div>
+                                </div>
+                            </div>`).join('')}
+                    </div>
+                </div>
+
+                ${canReply ? `
+                <form class="stack-sm" onsubmit="return window.__svReply(event)">
+                    <textarea class="textarea" id="ticket-reply" placeholder="Javobingizni yozing…" required></textarea>
+                    <button class="btn btn-primary btn-block"><i data-lucide="send"></i> Javob yuborish</button>
+                </form>` : ''}
+            </div>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Yopish</button>
+            ${canManage() || STATE.user.role === 'director'
+                ? `<button class="btn ${t.status === 'Yopilgan' ? 'btn-outline' : 'btn-success'}" onclick="window.__setTicketStatus(${t.id},'${t.status === 'Yopilgan' ? 'Ochiq' : 'Yopilgan'}')">
+                       <i data-lucide="${t.status === 'Yopilgan' ? 'rotate-ccw' : 'check-check'}"></i>
+                       ${t.status === 'Yopilgan' ? 'Qayta ochish' : 'Yopish'}
+                   </button>` : ''}`,
+    }));
+}
+window.openTicketModal = openTicketModal;
+
+window.__svReply = async (e) => {
+    e.preventDefault();
+    const text = document.getElementById('ticket-reply')?.value.trim();
+    if (!text) return false;
+    try {
+        await api_post(`/tickets/${STATE.activeTicketId}/reply`, { text });
+        showToast('Javob yuborildi', 'success');
+        openTicketModal(STATE.activeTicketId);
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+window.__setTicketStatus = async (id, status) => {
+    try {
+        await api_patch(`/tickets/${id}/status`, { status });
+        showToast('Ticket holati yangilandi', 'success');
+        openTicketModal(id);
+        if (STATE.view === 'support') renderView('support');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+function openCourseEditor(course = null) {
+    const c = course || {};
+    const lessons = c.lessons || [];
+    openModal(modalShell({
+        size: 'lg',
+        icon: '<i data-lucide="book-open"></i>',
+        title: course ? 'Kursni tahrirlash' : 'Yangi kurs',
+        body: `
+            <form id="form-course" class="stack" onsubmit="return window.__svCourse(event, ${course ? course.id : 'null'})">
+                <div class="field">
+                    <label class="label">Kurs nomi</label>
+                    <input class="input" name="title" value="${esc(c.title || '')}" required placeholder="Python asoslari">
+                </div>
+                <div class="field">
+                    <label class="label">Tavsif</label>
+                    <textarea class="textarea" name="description" placeholder="Kurs haqida qisqacha…">${esc(c.description || '')}</textarea>
+                </div>
+                <div class="grid grid-2" style="gap:12px">
+                    <div class="field">
+                        <label class="label">Kategoriya</label>
+                        <input class="input" name="category" value="${esc(c.category || 'Dasturlash')}">
+                    </div>
+                    <div class="field">
+                        <label class="label">Holat</label>
+                        <select class="select" name="status">
+                            ${['Ochiq', 'Yopiq', 'Arxiv'].map(s =>
+                                `<option ${(c.status || 'Ochiq') === s ? 'selected' : ''}>${s}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+                <div class="d-flex items-center justify-between">
+                    <div>
+                        <div class="fw-8" style="font-size:.9375rem">Darslar</div>
+                        <div class="t-xs c-muted">Har bir dars kamida 20 daqiqa</div>
+                    </div>
+                    <button type="button" class="btn btn-soft btn-sm" onclick="window.__addLessonRow()">
+                        <i data-lucide="plus"></i> Dars qo‘shish
+                    </button>
+                </div>
+                <div id="lesson-rows" class="stack-sm"></div>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-course').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash
+            </button>`,
+    }), 'lg');
+
+    const box = document.getElementById('lesson-rows');
+    const draw = () => {
+        box.innerHTML = lessons.length === 0
+            ? `<div class="form-hint">Hali dars qo‘shilmagan</div>`
+            : lessons.map((l, i) => lessonRowHtml(l, i)).join('');
+    };
+    window.__lessonDraft = lessons.map(l => ({ ...l }));
+    window.__addLessonRow = (l = {}) => {
+        window.__lessonDraft.push({
+            title: l.title || '', topic: l.topic || '', content: l.content || '', videoUrl: l.videoUrl || '',
+        });
+        draw();
+        safeLucide(box);
+    };
+    window.__rmLessonRow = (i) => { window.__lessonDraft.splice(i, 1); draw(); safeLucide(box); };
+    draw();
+    safeLucide(box);
+}
+window.openCourseEditor = openCourseEditor;
+
+function lessonRowHtml(l, i) {
+    return `
+        <div class="card card-pad-sm" data-lrow="${i}" style="border-style:dashed">
+            <div class="d-flex items-center justify-between mb-2">
+                <span class="badge badge-blue">${i + 1}-dars</span>
+                <button type="button" class="btn-icon sm" onclick="window.__rmLessonRow(${i})" aria-label="O’chirish">
+                    <i data-lucide="trash-2"></i>
+                </button>
+            </div>
+            <div class="stack-sm">
+                <input class="input" placeholder="Dars sarlavhasi" value="${esc(l.title || '')}"
+                       oninput="window.__lessonDraft[${i}].title=this.value">
+                <input class="input" placeholder="Mavzu (masalan: O‘zgaruvchilar)" value="${esc(l.topic || '')}"
+                       oninput="window.__lessonDraft[${i}].topic=this.value">
+                <input class="input" placeholder="Video havola (YouTube / Google Drive)" value="${esc(l.videoUrl || '')}"
+                       oninput="window.__lessonDraft[${i}].videoUrl=this.value">
+                <textarea class="textarea" placeholder="Dars matni…" style="min-height:70px"
+                          oninput="window.__lessonDraft[${i}].content=this.value">${esc(l.content || '')}</textarea>
+            </div>
+        </div>`;
+}
+
+window.__svCourse = async (e, id) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const payload = {
+        title: f.get('title'),
+        description: f.get('description'),
+        category: f.get('category'),
+        status: f.get('status'),
+        lessons: (window.__lessonDraft || []).filter(l => (l.title || '').trim()),
+    };
+    try {
+        if (id) await api_patch(`/courses/${id}`, payload);
+        else await api_post('/courses', payload);
+        showToast('Kurs saqlandi', 'success');
+        cModal();
+        if (STATE.view === 'course-detail' && STATE.activeCourseId === id) renderView('course-detail');
+        else renderView('courses');
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+// ─── Question editor ───────────────────────────────────────────────────
+function openQuestionEditor(q = null) {
+    const opts = ['A', 'B', 'C', 'D'];
+    openModal(modalShell({
+        icon: '<i data-lucide="list-checks"></i>',
+        title: q ? 'Savolni tahrirlash' : 'Yangi savol',
+        body: `
+            <form id="form-question" class="stack" onsubmit="return window.__svQuestion(event, ${q ? q.id : 'null'})">
+                <div class="field">
+                    <label class="label">Savol matni</label>
+                    <textarea class="textarea" name="questionText" required placeholder="Savolni yozing…">${esc(q?.questionText || '')}</textarea>
+                </div>
+                ${['A', 'B', 'C', 'D'].map((L, i) => `
+                    <div class="input-icon">
+                        <i data-lucide="${L === q?.correctAnswer ? 'circle-check' : 'circle'}" style="color:${L === q?.correctAnswer ? 'var(--green-600)' : 'var(--gray-300)'}"></i>
+                        <input class="input" name="option${L}" placeholder="${L}-variant" required
+                               value="${esc(q?.[`option${L}`] || '')}">
+                    </div>`).join('')}
+                <div class="grid grid-2" style="gap:12px">
+                    <div class="field">
+                        <label class="label">To‘g‘ri javob</label>
+                        <select class="select" name="correctAnswer">
+                            ${opts.map(o => `<option ${(q?.correctAnswer || 'A') === o ? 'selected' : ''}>${o}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="label">Turi</label>
+                        <select class="select" name="type">
+                            <option value="mini_game" ${(q?.type === 'quiz') ? '' : 'selected'}>Mini o‘yin</option>
+                            <option value="quiz" ${q?.type === 'quiz' ? 'selected' : ''}>Test</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label class="label">Qiyinlik</label>
+                    <select class="select" name="difficulty">
+                        ${['easy', 'medium', 'hard'].map(d =>
+                            `<option ${(q?.difficulty || 'medium') === d ? 'selected' : ''}>${d}</option>`).join('')}
+                    </select>
+                </div>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-question').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash
+            </button>`,
+    }));
+}
+window.openQuestionEditor = openQuestionEditor;
+
+window.__svQuestion = async (e, id) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try {
+        if (id) await api_patch(`/questions/${id}`, f);
+        else await api_post('/questions', f);
+        showToast('Savol saqlandi', 'success');
+        cModal();
+        renderView('questions');
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+window.__delQuestion = async (id) => {
+    if (!confirm('Savolni o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/questions/${id}`); showToast('Savol o‘chirildi', 'success'); renderView('questions'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+// ─── Group editor ──────────────────────────────────────────────────────
+window.openGroupEditor = async (group = null) => {
+    const [users, courses] = await Promise.all([
+        canManage() ? api_get('/users') : Promise.resolve([]),
+        getCourses(),
+    ]);
+    const teachers = users.filter(u => u.role === 'ustoz');
+    const students = users.filter(u => u.role === 'student');
+    const g = group || {};
+
+    openModal(modalShell({
+        icon: '<i data-lucide="users-round"></i>',
+        title: group ? 'Guruhni tahrirlash' : 'Yangi guruh',
+        body: `
+            <form id="form-group" class="stack" onsubmit="return window.__svGroup(event, ${group ? group.id : 'null'})">
+                <div class="field">
+                    <label class="label">Guruh nomi</label>
+                    <input class="input" name="name" required value="${esc(g.name || '')}" placeholder="IT-201">
+                </div>
+                <div class="field">
+                    <label class="label">O‘qituvchi</label>
+                    <select class="select" name="ustozId">
+                        <option value="">Tanlanmagan</option>
+                        ${teachers.map(t => `<option value="${t.id}" ${g.ustozId === t.id ? 'selected' : ''}>${esc(t.ism)}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="label">Talabalar (${(g.studentIds || []).length})</label>
+                    <div class="list-soft" style="max-height:260px;overflow-y:auto">
+                        ${students.length === 0
+                            ? '<div class="form-hint">Talabalar yo‘q</div>'
+                            : students.map(s => `
+                            <label class="list-row click" style="padding:9px 6px">
+                                ${avatarHtml(s, 'avatar-xs')}
+                                <div class="grow">
+                                    <div class="list-title" style="font-size:.8125rem">${esc(s.ism)}</div>
+                                    <div class="list-sub">${esc(s.email)}</div>
+                                </div>
+                                <input type="checkbox" name="students" value="${s.id}"
+                                       ${(g.studentIds || []).includes(s.id) ? 'checked' : ''}
+                                       style="width:18px;height:18px;accent-color:var(--primary)">
+                            </label>`).join('')}
+                    </div>
+                </div>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-group').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash
+            </button>`,
+    }));
+};
+
+window.__svGroup = async (e, id) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const payload = {
+        name: f.get('name'),
+        ustozId: f.get('ustozId') ? Number(f.get('ustozId')) : null,
+        studentIds: f.getAll('students').map(Number),
+    };
+    try {
+        if (id) await api_patch(`/groups/${id}`, payload);
+        else await api_post('/groups', payload);
+        showToast('Guruh saqlandi', 'success');
+        cModal();
+        renderView('groups');
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+window.__delGroup = async (id) => {
+    if (!confirm('Guruhni o‘chirishni tasdiqlaysizmi? Talabalar guruhsiz qoladi.')) return;
+    try { await api_del(`/groups/${id}`); showToast('Guruh o‘chirildi', 'success'); renderView('groups'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+// ─── Schedule editor ───────────────────────────────────────────────────
+const DAYS = ['Dushanba', 'Seshanba', 'Chorshanba', 'Payshanba', 'Juma', 'Shanba'];
+const todayDayName = () => DAYS[(new Date().getDay() + 6) % 7] || DAYS[0];
+
+window.openScheduleEditor = async (group) => {
+    if (!group) { showToast('Guruhni avval tanlang', 'error'); return; }
+    const draft = JSON.parse(JSON.stringify(group.schedule || []))
+        .filter(s => s && (s.day || s.time || s.subject));
+
+    const draw = () => {
+        const box = document.getElementById('sched-rows');
+        if (!box) return;
+        box.innerHTML = draft.length === 0
+            ? '<div class="sched-empty-box"><i data-lucide="calendar-plus"></i><b>Hafta jadvali bo‘sh</b><span>Pastdagi tugma bilan birinchi darsni qo‘shing</span></div>'
+            : draft.map((s, i) => `
+            <div class="sched-edit-row">
+                <div class="sched-edit-grid">
+                    <select class="input" onchange="window.__schedDraft[${i}].day=this.value">
+                        <option value="">— kun —</option>
+                        ${DAYS.map(d => `<option ${d === s.day ? 'selected' : ''}>${d}</option>`).join('')}
+                    </select>
+                    <input class="input" placeholder="09:00 — 10:30" value="${esc(s.time || '')}"
+                           oninput="window.__schedDraft[${i}].time=this.value">
+                </div>
+                <input class="input mt-2" placeholder="Fan yoki mashg‘ulot nomi" value="${esc(s.subject || '')}"
+                       oninput="window.__schedDraft[${i}].subject=this.value">
+                <div class="sched-edit-grid mt-2">
+                    <input class="input" placeholder="O‘qituvchi" value="${esc(s.teacher || '')}"
+                           oninput="window.__schedDraft[${i}].teacher=this.value">
+                    <input class="input" placeholder="Xona / auditoriya" value="${esc(s.room || '')}"
+                           oninput="window.__schedDraft[${i}].room=this.value">
+                </div>
+                <button type="button" class="btn-icon sm sched-del" onclick="window.__rmSched(${i})" aria-label="O‘chirish">
+                    <i data-lucide="trash-2"></i>
+                </button>
+            </div>`).join('');
+        safeLucide(box);
     };
 
-    if (!qData.questionText || !qData.optionA || !qData.optionB || !qData.optionC || !qData.optionD) {
-        showToast("Barcha maydonlarni to'ldiring!", "error");
-        return;
-    }
+    window.__schedDraft = draft;
+    window.__rmSched = (i) => { draft.splice(i, 1); draw(); };
+    window.__addSched = (day) => {
+        draft.push({ day: day || todayDayName(), time: '', subject: '', teacher: '', room: '' });
+        draw();
+    };
+    // Tayyor shablon — dushanba..juma, 4 darsdan
+    window.__fillSched = () => {
+        const plan = [['08:00 — 09:30', 'Matematika'], ['09:45 — 11:15', 'Informatika'],
+                      ['12:30 — 14:00', 'O‘zbek tili'], ['14:15 — 15:45', 'Ingliz tili']];
+        DAYS.slice(0, 5).forEach(day => plan.forEach(([time, subject]) =>
+            draft.push({ day, time, subject, teacher: '', room: '' })));
+        draw();
+    };
 
-    if (id) {
-        const idx = db.questions.findIndex(q => q.id === id);
-        if (idx !== -1) db.questions[idx] = qData;
-    } else {
-        db.questions.push(qData);
-    }
-
-    saveDB(db);
-    cModal();
-    renderView('questions_mgmt');
-    showToast(id ? "Savol yangilandi" : "Yangi savol qo'shildi");
-};
-
-window.markAttendance = (gId, sId, el) => {
-    const today = new Date().toISOString().split('T')[0];
-    let db = getDB();
-    let record = db.attendance.find(a => a.groupId === gId && a.date === today);
-
-    if (!record) {
-        record = { id: Date.now(), groupId: gId, date: today, records: {}, reasons: {} };
-        db.attendance.push(record);
-    }
-
-    const currentStatus = record.records[sId];
-    const newStatus = currentStatus === 'present' ? 'absent' : 'present';
-    record.records[sId] = newStatus;
-
-    // Toggle reason input visibility
-    const reasonContainer = document.getElementById(`reason-container-${sId}`);
-    if (reasonContainer) {
-        if (newStatus === 'absent') {
-            reasonContainer.classList.remove('hidden');
-        } else {
-            reasonContainer.classList.add('hidden');
-            if (record.reasons) delete record.reasons[sId];
-        }
-    }
-
-    // Logic for 3-day absence alert
-    if (newStatus === 'absent') {
-        const studentAttendanceRecords = db.attendance.filter(a => a.groupId === gId && a.records[sId] === 'absent');
-        let consecutiveAbsences = 0;
-        for (let i = studentAttendanceRecords.length - 1; i >= 0; i--) {
-            if (studentAttendanceRecords[i].records[sId] === 'absent') {
-                consecutiveAbsences++;
-            } else {
-                break;
-            }
-        }
-
-        if (consecutiveAbsences >= 3) {
-            const student = db.users.find(u => u.id === sId);
-            const group = db.groups.find(g => g.id === gId);
-            db.notifications = db.notifications || [];
-            const alertMsg = `Diqqat! ${student.ism} (Guruh: ${group.name}) ketma-ket ${consecutiveAbsences} marta darsga kelmadi.`;
-            
-            const existingNotification = db.notifications.find(n => 
-                n.msg.includes(student.ism) && 
-                n.date === today && 
-                n.type === 'warning'
-            );
-
-            if (!existingNotification) {
-                db.notifications.push({ id: Date.now(), msg: alertMsg, date: today, type: 'warning', seen: false });
-                showToast("3 kunlik dars qoldirish aniqlandi!", "error");
-            }
-        }
-    }
-
-    saveDB(db);
-    el.className = `attendance-switch-premium ${newStatus}`;
-};
-
-window.updateAttendanceReason = (gId, sId, val) => {
-    let db = getDB();
-    const today = new Date().toISOString().split('T')[0];
-    let record = db.attendance.find(a => a.groupId === gId && a.date === today);
-    if (record) {
-        record.reasons = record.reasons || {};
-        record.reasons[sId] = val;
-        saveDB(db);
-    }
-};
-
-window.updateStudentPhone = (sId, val) => {
-    let db = getDB();
-    let u = db.users.find(x => x.id === sId);
-    if (u) {
-        u.phone = val;
-        saveDB(db);
-        showToast("Telefon raqami saqlandi");
-    }
-};
-
-const originalOModal = window.oModal;
-window.oModal = (type, lId) => {
-    if (type === 'add-group') {
-        const bg = document.getElementById('modal-root'), a = document.getElementById('modal-content-area');
-        bg.classList.remove('hidden'); bg.classList.add('flex');
-        const db = getDB();
-        const ustozlar = db.users.filter(u => u.role === 'ustoz');
-        
-        a.innerHTML = `
-        <div class="bg-white p-10 rounded-[2.5rem] animate-zoom w-full max-w-lg shadow-2xl">
-            <h2 class="text-3xl font-black mb-6 text-slate-800">Yangi Guruh</h2>
-            <form onsubmit="svGroup(event)">
-                <div class="space-y-4">
-                    <input id="mg-name" required placeholder="Guruh nomi (masalan: D 02 25)" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold">
-                    <select id="mg-ustoz" required class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold">
-                        <option value="" disabled selected>Ustozni tanlang</option>
-                        ${ustozlar.map(u => `<option value="${u.id}">${u.ism}</option>`).join('')}
-                    </select>
-                    <button class="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl shadow-xl hover:bg-indigo-700">Yaratish</button>
+    openModal(modalShell({
+        icon: '<i data-lucide="calendar-days"></i>',
+        title: `Jadval — ${esc(group.name)}`,
+        size: 'lg',
+        body: `
+            <div class="stack">
+                <div class="sched-edit-head">
+                    <div>
+                        <div class="fw-8">Haftalik mashg‘ulotlar</div>
+                        <div class="form-hint">Kun, vaqt, fan, o‘qituvchi va xonani kiriting</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-soft btn-sm" onclick="window.__fillSched()">
+                            <i data-lucide="wand-2"></i> Shablon</button>
+                        <button class="btn btn-primary btn-sm" onclick="window.__addSched()">
+                            <i data-lucide="plus"></i> Dars qo‘shish</button>
+                    </div>
                 </div>
-            </form>
+                <div id="sched-rows" class="stack-sm"></div>
+            </div>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="window.__svSchedule(${group.id})">
+                <i data-lucide="save"></i> Jadvalni saqlash
+            </button>`,
+    }));
+
+    draw();
+};
+
+window.__svSchedule = async (gid) => {
+    try {
+        const clean = (window.__schedDraft || [])
+            .filter(s => (s.day || s.time || s.subject))
+            .map(s => ({
+                day: (s.day || '').trim(), time: (s.time || '').trim(),
+                subject: (s.subject || '').trim(),
+                teacher: (s.teacher || '').trim(), room: (s.room || '').trim(),
+            }));
+        await api_patch(`/groups/${gid}`, { schedule: clean });
+        showToast('Jadval saqlandi', 'success');
+        cModal();
+        renderView('schedule');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Dashboards
+// ══════════════════════════════════════════════════════════════════════
+function greeting() {
+    const h = new Date().getHours();
+    if (h < 6) return 'Xayrli tong';
+    if (h < 12) return 'Xayrli tong';
+    if (h < 18) return 'Xayrli kun';
+    return 'Xayrli kech';
+}
+
+function heroPanel(user, subtitle, extra = '') {
+    // `subtitle` — qator: matn yoki qismlar massivi (nuqta bilan ajratiladi).
+    // Eski variantda butun qator bir xil oq rangda chiqardi va gradient ustida
+    // yozuvdek yo'qotilardi — endi rol och-ko'k, XP esa sariq «chip» bilan ajraladi.
+    const parts = (Array.isArray(subtitle) ? subtitle : [subtitle]).filter(Boolean).map(esc);
+    const hasXp = user.points !== undefined && user.points !== null;
+    const meta = [
+        ...parts.map(p => `<span>${p}</span>`),
+        hasXp ? `<span class="xp"><i data-lucide="zap"></i>${num(user.points)} XP</span>` : '',
+    ].join('<span class="dot"></span>');
+    return `
+        <div class="hero-panel">
+            <div class="hero-kicker"><i data-lucide="sparkles"></i> ${greeting()}</div>
+            <h2 class="hero-title">${esc(user.ism)}</h2>
+            ${meta ? `<div class="hero-text">${meta}</div>` : ''}
+            ${extra}
         </div>`;
-        safeLucide(a);
-        return;
-    }
-    if (type === 'add-book') {
-        const bg = document.getElementById('modal-root'), a = document.getElementById('modal-content-area');
-        bg.classList.remove('hidden'); bg.classList.add('flex');
-        a.innerHTML = `
-        <div class="bg-white p-10 rounded-[2.5rem] animate-zoom w-full max-w-xl shadow-2xl">
-            <h2 class="text-3xl font-black mb-6 text-slate-800">📚 Kitob Qo'shish</h2>
-            <form onsubmit="svBook(event)">
-                <div class="space-y-4">
-                    <input id="bk-title" required placeholder="Kitob nomi" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none">
-                    <textarea id="bk-desc" required placeholder="Tavsif yoki muallif..." class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none" rows="3"></textarea>
-                    <input id="bk-img" placeholder="Muqova rasm URL (ixtiyoriy)" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none">
-                    <input id="bk-link" placeholder="PDF yoki havola URL (ixtiyoriy)" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none">
-                    <div class="flex gap-4 pt-2">
-                        <button type="button" onclick="cModal()" class="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl">Bekor</button>
-                        <button class="flex-2 bg-indigo-600 text-white font-black px-10 py-4 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all">Saqlash</button>
-                    </div>
-                </div>
-            </form>
-        </div>`;
-        safeLucide(a);
-        return;
-    }
-    if (type === 'view-book') {
-        const db = getDB();
-        const b = (db.books || []).find(x => x.id === lId);
-        if (!b) return;
-        const bg = document.getElementById('modal-root'), a = document.getElementById('modal-content-area');
-        bg.classList.remove('hidden'); bg.classList.add('flex');
-        a.innerHTML = `
-        <div class="bg-white rounded-[3rem] overflow-hidden animate-zoom w-full max-w-2xl shadow-2xl">
-            ${b.image ? `<div class="h-64 overflow-hidden relative">
-                <img src="${b.image}" class="w-full h-full object-cover" onerror="this.style.display='none'">
-                <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
-            </div>` : '<div class="h-32 bg-gradient-to-br from-indigo-100 to-purple-100"></div>'}
-            <div class="p-10">
-                <h2 class="text-3xl font-black text-slate-800 mb-3">${b.title}</h2>
-                <p class="text-slate-600 font-medium text-lg leading-relaxed mb-8">${b.description || ''}</p>
-                ${b.link && b.link !== '#' ? `
-                <a href="${b.link}" target="_blank" class="inline-flex items-center gap-3 bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black shadow-lg hover:bg-indigo-700 transition-all">
-                    <i data-lucide="download" class="w-5 h-5"></i> Kitobni Yuklab Olish
-                </a>` : '<p class="text-slate-300 font-bold italic text-sm">Yuklab olish havolasi yo\'q</p>'}
-                <button onclick="cModal()" class="mt-6 block w-full text-center py-4 bg-slate-50 text-slate-500 font-black rounded-2xl hover:bg-slate-100 transition-all">Yopish</button>
-            </div>
-        </div>`;
-        safeLucide(a);
-        return;
-    }
-    if (type === 'add-question' || type === 'edit-question') {
-        const bg = document.getElementById('modal-root'), a = document.getElementById('modal-content-area');
-        bg.classList.remove('hidden'); bg.classList.add('flex');
-        const db = getDB();
-        const q = type === 'edit-question' ? db.questions.find(x => x.id === lId) : null;
-        
-        a.innerHTML = `
-        <div class="bg-white p-10 rounded-[2.5rem] animate-zoom w-full max-w-xl shadow-2xl relative overflow-hidden">
-            <div class="absolute -top-10 -right-10 w-40 h-40 bg-indigo-50 rounded-full blur-3xl"></div>
-            <h2 class="text-3xl font-black mb-8 text-slate-800 relative">${q ? 'Savolni Tahrirlash' : 'Yangi Savol'}</h2>
-            <form onsubmit="svQuestion(event, ${q ? q.id : 'null'})" class="space-y-4 relative">
-                <div>
-                    <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Savol Matni</label>
-                    <textarea id="mq-text" required placeholder="Savol matnini kiriting..." class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none focus:border-indigo-300 transition-all" rows="3">${q ? q.questionText : ''}</textarea>
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Variant A</label>
-                        <input id="mq-a" required value="${q ? q.optionA : ''}" placeholder="Variant A" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none focus:border-indigo-300 transition-all">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Variant B</label>
-                        <input id="mq-b" required value="${q ? q.optionB : ''}" placeholder="Variant B" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none focus:border-indigo-300 transition-all">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Variant C</label>
-                        <input id="mq-c" required value="${q ? q.optionC : ''}" placeholder="Variant C" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none focus:border-indigo-300 transition-all">
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Variant D</label>
-                        <input id="mq-d" required value="${q ? q.optionD : ''}" placeholder="Variant D" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none focus:border-indigo-300 transition-all">
-                    </div>
-                </div>
-                <div class="grid grid-cols-3 gap-4">
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">To'g'ri Javob</label>
-                        <select id="mq-correct" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none cursor-pointer">
-                            <option value="A" ${q && q.correctAnswer === 'A' ? 'selected' : ''}>A</option>
-                            <option value="B" ${q && q.correctAnswer === 'B' ? 'selected' : ''}>B</option>
-                            <option value="C" ${q && q.correctAnswer === 'C' ? 'selected' : ''}>C</option>
-                            <option value="D" ${q && q.correctAnswer === 'D' ? 'selected' : ''}>D</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Turi</label>
-                        <select id="mq-type" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none cursor-pointer">
-                            <option value="mini_game" ${q && q.type === 'mini_game' ? 'selected' : ''}>Mini Game</option>
-                            <option value="duel" ${q && q.type === 'duel' ? 'selected' : ''}>Duel</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 mb-1 ml-1">Qiyinchilik</label>
-                        <select id="mq-diff" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white outline-none cursor-pointer">
-                            <option value="easy" ${q && q.difficulty === 'easy' ? 'selected' : ''}>Easy</option>
-                            <option value="medium" ${q && q.difficulty === 'medium' ? 'selected' : ''}>Medium</option>
-                            <option value="hard" ${q && q.difficulty === 'hard' ? 'selected' : ''}>Hard</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="flex gap-4 pt-6">
-                    <button type="button" onclick="cModal()" class="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all">Bekor qilish</button>
-                    <button class="flex-2 bg-indigo-600 text-white font-black px-10 py-4 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all">Saqlash</button>
-                </div>
-            </form>
-        </div>`;
-        safeLucide(a);
-        return;
-    }
-    if (type === 'change-password') {
-        const bg = document.getElementById('modal-root'), a = document.getElementById('modal-content-area');
-        bg.classList.remove('hidden'); bg.classList.add('flex');
-        a.innerHTML = `<div class="bg-white p-10 rounded-[2.5rem] animate-zoom w-full max-w-lg shadow-2xl">
-            <h2 class="text-3xl font-black mb-6 text-slate-800 flex items-center gap-3"><i data-lucide="lock" class="text-indigo-600"></i> Parolni o'zgartirish</h2>
-            <div class="space-y-4">
-                <input type="password" id="cp-old" placeholder="Eski parol" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none">
-                <input type="password" id="cp-new" placeholder="Yangi parol" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none">
-                <input type="password" id="cp-confirm" placeholder="Yangi parolni tasdiqlang" class="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl font-bold focus:bg-white focus:border-indigo-300 outline-none">
-                <div class="flex gap-4 pt-4">
-                    <button onclick="cModal()" class="flex-1 bg-slate-100 text-slate-500 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all">Bekor qilish</button>
-                    <button onclick="changePasswordSubmit()" class="flex-2 bg-indigo-600 text-white font-black px-10 py-4 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all">O'zgartirish</button>
-                </div>
-            </div>
-        </div>`;
-        safeLucide(a);
-        return;
-    }
-    originalOModal(type, lId);
-};
+}
 
-window.changePasswordSubmit = () => {
-    let db = getDB();
-    const oldP = document.getElementById('cp-old')?.value || document.getElementById('prof-pw-old')?.value;
-    const newP = document.getElementById('cp-new')?.value || document.getElementById('prof-pw-new')?.value;
-    const confP = document.getElementById('cp-confirm')?.value || document.getElementById('prof-pw-conf')?.value;
+function userStats(u) {
+    const progress = u.progress || {};
+    const lessonsDone = Object.values(progress)
+        .reduce((acc, c) => acc + ((c?.completed?.length) || 0), 0);
+    const avgPercent = Object.values(progress).length
+        ? Math.round(Object.values(progress).reduce((a, c) => a + num(c?.percent), 0) / Object.values(progress).length)
+        : 0;
+    return { lessonsDone, avgPercent, duelWins: num(u.duelWins), points: num(u.points) };
+}
 
-    let u = db.users.find(x => x.id === STATE.user.id);
-    if (!u) return;
-
-    if (u.password !== oldP) { showToast("Eski parol noto'g'ri!", "error"); return; }
-    if (!newP) { showToast("Yangi parol bo'sh bo'lishi mumkin emas!", "error"); return; }
-    if (newP !== confP) { showToast("Yangi parollar mos kelmadi!", "error"); return; }
-
-    u.password = newP;
-    saveDB(db);
-    STATE.user.password = newP;
-    localStorage.setItem('lms_user', JSON.stringify(STATE.user));
-    
-    if(document.getElementById('prof-pw-old')) document.getElementById('prof-pw-old').value = '';
-    if(document.getElementById('prof-pw-new')) document.getElementById('prof-pw-new').value = '';
-    if(document.getElementById('prof-pw-conf')) document.getElementById('prof-pw-conf').value = '';
-    
-    if(document.getElementById('cp-old')) document.getElementById('cp-old').value = '';
-    if(document.getElementById('cp-new')) document.getElementById('cp-new').value = '';
-    if(document.getElementById('cp-confirm')) document.getElementById('cp-confirm').value = '';
-    
-    showToast("Parol o‘zgartirildi!");
-    cModal();
-};
-
-window.assignUstozToGroup = (gId, uId) => {
-    if (!uId) return;
-    let db = getDB();
-    const group = db.groups.find(g => g.id === gId);
-    if (group) {
-        group.ustozId = parseInt(uId);
-        const today = new Date().toLocaleDateString('uz-UZ', { year: 'numeric', month: 'long', day: 'numeric' });
-        
-        db.notifications = db.notifications || [];
-        group.studentIds.forEach(sId => {
-            db.notifications.push({
-                id: Date.now() + Math.random(),
-                userId: sId,
-                msg: "Yangi ustoz sizning guruhingizga qo‘shildi",
-                date: today,
-                type: 'info',
-                seen: false
-            });
-        });
-        
-        saveDB(db);
-        showToast("Ustoz tayinlandi");
-        renderView('groups');
-    }
-};
-
-window.svBook = (e) => {
-    e.preventDefault();
-    let db = getDB();
-    db.books = db.books || [];
-    db.books.push({
-        id: Date.now(),
-        title: document.getElementById('bk-title').value,
-        description: document.getElementById('bk-desc').value,
-        image: document.getElementById('bk-img').value,
-        link: document.getElementById('bk-link').value || '#'
-    });
-    saveDB(db);
-    cModal();
-    renderView('library');
-    showToast("Kitob qo'shildi! 📚");
-};
-
-window.svGroup = (e) => {
-    e.preventDefault();
-    let db = getDB();
-    db.groups = db.groups || [];
-    db.groups.push({
-        id: Date.now(),
-        name: document.getElementById('mg-name').value,
-        ustozId: parseInt(document.getElementById('mg-ustoz').value),
-        studentIds: []
-    });
-    saveDB(db);
-    cModal();
-    renderView('groups');
-    showToast('Guruh yaratildi');
-};
-
-// ======================== GROUP CHAT SYSTEM ========================
-let VOICE_RECORDER = null;
-let VOICE_CHUNKS = [];
-let VOICE_BLOB = null;
-let IS_RECORDING = false;
-
-const v_chat = () => {
-    const db = getDB();
-    const r = STATE.user.role;
-    let gid = STATE.user.groupId;
-    
-    // Pick first group if teacher has no fixed groupId but manages groups
-    if (!gid && (r === 'ustoz' || r === 'admin')) {
-        const mg = db.groups.find(x => r === 'admin' ? true : x.ustozId === STATE.user.id);
-        if (mg) gid = mg.id;
-    }
-    
-    if (!gid) return `<div class="p-10 text-center"><i data-lucide="info" class="w-16 h-16 text-slate-200 mx-auto mb-4"></i><h2 class="text-2xl font-black">Guruh topilmadi</h2><p class="text-slate-500 font-bold">Siz hali birorta guruhga a'zo emassiz.</p></div>`;
-
-    const g = db.groups.find(x => x.id === gid);
-    const msgs = (db.chatMessages || []).filter(m => r === 'admin' ? m.groupId === gid : m.groupId === gid);
-
-    setTimeout(() => {
-        const area = document.getElementById('chat-messages-area');
-        if (area) area.scrollTop = area.scrollHeight;
-    }, 100);
+async function d_student() {
+    const u = STATE.user;
+    const [courses, notifs, achs, att] = await Promise.all([
+        getCourses(), getNotifications(), getAchievements(), getMyAttendance().catch(() => []),
+    ]);
+    const s = userStats(u);
+    const unlocked = u.achievements || [];
+    const totalAch = achs.length;
+    const present = (att || []).filter(a => a.status === 'present').length;
+    const attTotal = (att || []).length;
+    const attPct = attTotal ? Math.round((present / attTotal) * 100) : 0;
 
     return `
-    <div class="chat-container">
-        <div class="p-6 border-b border-slate-100 flex items-center justify-between bg-white relative z-10">
-            <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-black">
-                    ${g ? g.name[0] : 'C'}
-                </div>
-                <div>
-                    <div class="flex items-center gap-3">
-                        <h2 class="text-xl font-black text-slate-800">${g ? g.name : 'Guruh Chat'}</h2>
-                        ${r === 'admin' ? `
-                            <select onchange="STATE.user.groupId=parseInt(this.value); renderView('chat')" class="bg-slate-50 border border-slate-200 text-[10px] font-black uppercase px-2 py-1 rounded-lg outline-none cursor-pointer">
-                                ${db.groups.map(gr => `<option value="${gr.id}" ${gr.id === gid ? 'selected' : ''}>${gr.name}</option>`).join('')}
-                            </select>
-                        ` : ''}
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Guruh a'zolari bilan online</p>
-                    </div>
-                </div>
-            </div>
-            <div class="flex gap-2">
-            </div>
+        ${heroPanel(u, [roleLabel(u.role), 'Bugungi kun'], `
+            <div class="hero-badges">
+                <span class="badge"><i data-lucide="trophy"></i> ${unlocked.length}/${totalAch} yutuq</span>
+                <span class="badge hot"><i data-lucide="book-open-check"></i> ${s.lessonsDone} dars</span>
+            </div>`)}
+
+        <div class="grid grid-4 mt-6">
+            ${statTile({ label: 'Ballarim', value: u.points, icon: 'zap', tone: 'accent', href: '#leaderboard' })}
+            ${statTile({ label: 'Yakunlangan dars', value: s.lessonsDone, icon: 'book-open-check', href: '#courses' })}
+            ${statTile({ label: 'O‘yin ballari', value: s.duelWins, icon: 'gamepad-2', tone: 'violet', href: '#game' })}
+            ${statTile({ label: 'Davomat', value: `${attPct}%`, icon: 'user-check', tone: attPct >= 70 ? 'green' : 'amber', foot: `${present}/${attTotal} kun` })}
         </div>
 
-        <div class="chat-messages" id="chat-messages-area">
-            ${msgs.map(m => {
-                const isMe = m.userId === STATE.user.id;
-                return `
-                <div class="msg-wrapper ${isMe ? 'me' : 'other'} w-full" id="msg-${m.id}">
-                    <div class="flex items-center gap-2 mb-1 w-full ${isMe ? 'justify-end' : ''}">
-                        <span class="msg-meta">${isMe ? 'Siz' : m.userName}</span>
+        <div class="split split-2 mt-6">
+            <div class="stack">
+                ${sectionCard('Kurslarim', `
+                    <div class="stack-sm">
+                        ${courses.length === 0
+                            ? emptyState('book-open', 'Kurslar yo‘q', 'Hozircha mavjud kurs kiritilmagan.')
+                            : courses.slice(0, 5).map(c => {
+                                const pct = courseProgress(c);
+                                return `
+                            <button class="card card-pad-sm card-hover" style="text-align:left;width:100%" onclick="window.__openCourse(${c.id})">
+                                <div class="d-flex items-center gap-3 mb-3">
+                                    <div class="card-icon">${pct >= 100 ? '<i data-lucide="badge-check"></i>' : '<i data-lucide="book-open"></i>'}</div>
+                                    <div class="grow" style="min-width:0">
+                                        <div class="list-title truncate">${esc(c.title)}</div>
+                                        <div class="list-sub">${esc(c.category || '')} · ${(c.lessons || []).length} dars</div>
+                                    </div>
+                                    <span class="badge ${pct >= 100 ? 'badge-green' : 'badge-blue'}">${pct}%</span>
+                                </div>
+                                ${progressBar(pct, pct >= 100 ? 'green' : '')}
+                            </button>`;
+                            }).join('')}
                     </div>
-                    <div class="msg-bubble relative group/inner flex ${isMe ? 'justify-end' : 'justify-start'}">
-                        ${(isMe || r === 'admin' || r === 'ustoz') ? `
-                            <button onclick="deleteChatMessage(${m.id})" class="absolute -top-3 ${isMe ? '-left-3' : '-right-3'} md:top-1/2 md:-translate-y-1/2 md:${isMe ? '-left-10' : '-right-10'} opacity-100 md:opacity-0 md:group-hover/inner:opacity-100 transition-opacity p-2 bg-red-50 text-red-500 rounded-full hover:bg-red-100 shadow-sm active:scale-95 z-20">
-                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
-                        ` : ''}
-                        <div>
-                            ${m.type === 'image' ? `<img src="${m.text}" class="msg-image rounded-xl mb-1 shadow-sm" onclick="zoomImage(this)">` : 
-                              m.type === 'voice' ? `
-                                <div class="flex items-center gap-3 bg-white/10 p-2 rounded-xl backdrop-blur-sm min-w-[200px]">
-                                    <button onclick="playVoice('${m.text}', this)" class="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition active:scale-95">
-                                        <i data-lucide="play" class="w-5 h-5"></i>
-                                    </button>
-                                    <div class="flex-1">
-                                        <div class="h-1 bg-white/20 rounded-full overflow-hidden">
-                                            <div class="h-full bg-white voice-progress w-0"></div>
+                    ${courses.length > 5 ? `<button class="btn btn-soft btn-block mt-4" onclick="go('courses')">Barcha kurslar <i data-lucide="arrow-right"></i></button>` : ''}
+                `, { icon: '<i data-lucide="library-big"></i>', sub: 'Davom etayotgan darslaringiz' })}
+
+                ${sectionCard('Yutuqlarim', `
+                    ${unlocked.length === 0
+                        ? emptyState('lock', 'Hali yutuq yo‘q', 'Darslarni tugatib, ball to‘plab boring.')
+                        : `<div class="grid grid-2" style="gap:12px">
+                            ${unlocked.slice(0, 6).map(id => {
+                                const a = achs.find(x => x.id === id);
+                                if (!a) return '';
+                                return `
+                                <div class="card card-pad-sm rarity-${esc(a.rarity || 'common')}">
+                                    <div class="d-flex items-center gap-3">
+                                        <div style="font-size:1.75rem">${esc(a.icon || '🏆')}</div>
+                                        <div style="min-width:0">
+                                            <div class="list-title truncate">${esc(a.title)}</div>
+                                            <div class="list-sub clamp-2">${esc(a.desc || '')}</div>
                                         </div>
-                                        <p class="text-[8px] font-bold uppercase mt-1 opacity-70">Ovozli xabar • ${m.duration || '0:00'}</p>
+                                    </div>
+                                </div>`;
+                            }).join('')}
+                        </div>`}
+                `, { icon: '<i data-lucide="award"></i>', sub: `${unlocked.length} / ${totalAch} ochilgan` })}
+            </div>
+
+            <div class="stack">
+                <div data-bonus>
+                    ${sectionCard('Kunlik bonus', canClaimBonus()
+                        ? `<div class="stack-sm">
+                            <p class="t-sm c-muted">Har 20 daqiqada +20 XP oling. Bugungi bonusni olishingiz mumkin.</p>
+                            <button class="btn btn-accent btn-block" onclick="claimDailyBonus(this)">
+                                <i data-lucide="gift"></i> +20 XP olish
+                            </button>
+                        </div>`
+                        : `<div class="d-flex items-center gap-3">
+                            <div class="card-icon green"><i data-lucide="check"></i></div>
+                            <div>
+                                <div class="fw-8 t-base">Bugungi bonus olingan</div>
+                                <div class="t-xs c-muted">Keyingi bonus birozdan keyin</div>
+                            </div>
+                        </div>`, { icon: '<i data-lucide="gift"></i>' })}
+                </div>
+
+                ${sectionCard('Tezkor o‘tish', `
+                    <div class="stack-sm">
+                        <button class="tile click" onclick="go('courses')" style="padding:14px">
+                            <div class="d-flex items-center gap-3">
+                                <div class="tile-icon"><i data-lucide="book-open"></i></div>
+                                <div class="grow">
+                                    <div class="tile-title">Darslarni davom ettirish</div>
+                                    <div class="tile-sub">O‘zbek o‘laroq progressingiz ${s.avgPercent}%</div>
+                                </div>
+                            </div>
+                        </button>
+                        <button class="tile click" onclick="go('shop')" style="padding:14px">
+                            <div class="d-flex items-center gap-3">
+                                <div class="tile-icon accent"><i data-lucide="shopping-bag"></i></div>
+                                <div class="grow">
+                                    <div class="tile-title">Do‘kon</div>
+                                    <div class="tile-sub">${num(u.points)} XP — sovg‘a olsh</div>
+                                </div>
+                            </div>
+                        </button>
+                        <button class="tile click" onclick="go('game')" style="padding:14px">
+                            <div class="d-flex items-center gap-3">
+                                <div class="tile-icon green"><i data-lucide="gamepad-2"></i></div>
+                                <div class="grow">
+                                    <div class="tile-title">Mini o‘yin</div>
+                                    <div class="tile-sub">Tezkor savollar, +30 XP</div>
+                                </div>
+                            </div>
+                        </button>
+                    </div>`, { icon: '<i data-lucide="zap"></i>' })}
+
+                ${sectionCard('So‘nggi bildirishnomalar', notifs.length === 0
+                    ? emptyState('bell-off', 'Bildirishnoma yo‘q')
+                    : `<div class="list list-flush">
+                        ${notifs.slice(0, 5).map(n => `
+                            <div class="list-row items-start">
+                                <div class="card-icon ${n.type === 'warning' ? 'red' : n.type === 'success' ? 'green' : ''}" style="width:32px;height:32px">
+                                    <i data-lucide="${n.type === 'warning' ? 'triangle-alert' : n.type === 'success' ? 'check' : 'info'}"></i>
+                                </div>
+                                <div class="grow">
+                                    <div class="t-sm fw-6">${esc(n.msg)}</div>
+                                    <div class="t-xs c-soft mt-1">${esc(n.date || '')}</div>
+                                </div>
+                                ${!n.seen ? '<span class="badge badge-blue">yangi</span>' : ''}
+                            </div>`).join('')}
+                    </div>`, { icon: '<i data-lucide="bell"></i>' })}
+            </div>
+        </div>`;
+}
+
+async function d_ustoz() {
+    const u = STATE.user;
+    const [groups, courses, att, grades] = await Promise.all([
+        getGroups(), getCourses(), getAttendance().catch(() => []), getGrades(),
+    ]);
+    const myGroups = groups.filter(g => g.ustozId === u.id || u.role !== 'ustoz');
+    const students = myGroups.flatMap(g => g.studentIds || []);
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRec = att.find(r => r.date === today);
+    const markedToday = todayRec ? Object.keys(todayRec.records || {}).length : 0;
+    const myLessons = courses.reduce((a, c) => a + (c.lessons || []).length, 0);
+
+    return `
+        ${heroPanel(u, [roleLabel(u.role), `${myGroups.length} guruh`, `${students.length} talaba`], `
+            <div class="d-flex gap-2 mt-5 flex-wrap">
+                <button class="btn btn-white btn-sm" onclick="go('attendance')"><i data-lucide="user-check"></i> Davomat</button>
+                <button class="btn btn-white btn-sm" onclick="go('grades')"><i data-lucide="graduation-cap"></i> Baho qo‘yish</button>
+                <button class="btn btn-white btn-sm" onclick="openCourseEditor()"><i data-lucide="plus"></i> Yangi kurs</button>
+            </div>`)}
+
+        <div class="grid grid-4 mt-6">
+            ${statTile({ label: 'Guruhlarim', value: myGroups.length, icon: 'users-round', href: '#groups' })}
+            ${statTile({ label: 'Talabalar', value: students.length, icon: 'users', tone: 'accent', href: '#grades' })}
+            ${statTile({ label: 'Kurslarim', value: courses.length, icon: 'book-open', sub: `${myLessons} dars`, href: '#courses' })}
+            ${statTile({
+                label: 'Bugungi davomat', value: `${markedToday}/${students.length}`, icon: 'user-check',
+                tone: markedToday >= students.length && students.length ? 'green' : 'amber', href: '#attendance',
+            })}
+        </div>
+
+        <div class="split split-2 mt-6">
+            <div class="stack">
+                ${sectionCard('Guruhlarim', myGroups.length === 0
+                    ? emptyState('users-round', 'Guruh biriktirilmagan', 'Administrator sizga guruh biriktirishi kerak.')
+                    : `<div class="stack-sm">
+                        ${myGroups.map(g => `
+                            <button class="card card-pad-sm card-hover" style="text-align:left;width:100%" onclick="go('groups')">
+                                <div class="d-flex items-center gap-3">
+                                    <div class="card-icon"><i data-lucide="users"></i></div>
+                                    <div class="grow">
+                                        <div class="list-title">${esc(g.name)}</div>
+                                        <div class="list-sub">${(g.studentIds || []).length} talaba · ${(g.schedule || []).length} mashg‘ulot</div>
+                                    </div>
+                                    <i data-lucide="chevron-right" style="color:var(--gray-300)"></i>
+                                </div>
+                            </button>`).join('')}
+                    </div>`, { icon: '<i data-lucide="users-round"></i>' })}
+
+                ${sectionCard('Oxirgi baholar', grades.length === 0
+                    ? emptyState('graduation-cap', 'Hali baho qo‘ymagan', 'Baho qo‘yish uchun “Baholar” bo‘limiga o‘ting.')
+                    : `<div class="table-wrap"><table class="table responsive">
+                        <thead><tr><th>Talaba</th><th data-label="Baho">Baho</th><th data-label="Sana">Sana</th></tr></thead>
+                        <tbody>${grades.slice(0, 8).map(g => `
+                            <tr>
+                                <td data-label="Talaba"><span class="cell-main">Talaba #${g.studentId}</span></td>
+                                <td data-label="Baho">${gradePill(g.value)}</td>
+                                <td data-label="Sana"><span class="cell-sub">${esc(g.date || '')}</span></td>
+                            </tr>`).join('')}</tbody>
+                    </table></div>`, { icon: '<i data-lucide="graduation-cap"></i>' })}
+            </div>
+
+            <div class="stack">
+                ${sectionCard('Kengaytmalar', `
+                    <div class="stack-sm">
+                        <button class="tile click" onclick="go('questions')" style="padding:14px">
+                            <div class="d-flex items-center gap-3">
+                                <div class="tile-icon violet"><i data-lucide="list-checks"></i></div>
+                                <div class="grow"><div class="tile-title">Savol banki</div>
+                                    <div class="tile-sub">O‘yin va test uchun savollar</div></div>
+                            </div>
+                        </button>
+                        <button class="tile click" onclick="openScheduleEditor(window.__myGroup)" style="padding:14px">
+                            <div class="d-flex items-center gap-3">
+                                <div class="tile-icon green"><i data-lucide="calendar-days"></i></div>
+                                <div class="grow"><div class="tile-title">Jadvalni tahrirlash</div>
+                                    <div class="tile-sub">Haftalik mashg‘ulotlar</div></div>
+                            </div>
+                        </button>
+                        <button class="tile click" onclick="go('staff-chat')" style="padding:14px">
+                            <div class="d-flex items-center gap-3">
+                                <div class="tile-icon accent"><i data-lucide="messages-square"></i></div>
+                                <div class="grow"><div class="tile-title">Xodimlar chat</div>
+                                    <div class="tile-sub">Jamoa bilan muhokama</div></div>
+                            </div>
+                        </button>
+                    </div>`, { icon: '<i data-lucide="blocks"></i>' })}
+            </div>
+        </div>`;
+}
+
+async function d_admin() {
+    const [users, groups, courses, posts, tickets] = await Promise.all([
+        getUsers(), getGroups(), getCourses(), getPosts(), getTickets(),
+    ]);
+    const students = users.filter(u => u.role === 'student');
+    const staff = users.filter(u => ['ustoz', 'admin', 'tech_admin', 'director'].includes(u.role));
+    const pending = posts.filter(p => !p.approved);
+    const openTickets = tickets.filter(t => t.status !== 'Yopilgan');
+
+    return `
+        ${heroPanel(STATE.user, [roleLabel(STATE.user.role), 'platforma boshqaruvi'], `
+            <div class="d-flex gap-2 mt-5 flex-wrap">
+                <button class="btn btn-white btn-sm" onclick="window.__openUserEditor()"><i data-lucide="user-plus"></i> Foydalanuvchi</button>
+                <button class="btn btn-white btn-sm" onclick="openGroupEditor()"><i data-lucide="users-round"></i> Guruh</button>
+                <button class="btn btn-white btn-sm" onclick="go('settings')"><i data-lucide="settings"></i> Sozlamalar</button>
+            </div>`)}
+
+        <div class="grid grid-4 mt-6">
+            ${statTile({ label: 'Talabalar', value: students.length, icon: 'users', href: '#users' })}
+            ${statTile({ label: 'Xodimlar', value: staff.length, icon: 'user-cog', tone: 'accent', href: '#users' })}
+            ${statTile({ label: 'Guruhlar', value: groups.length, icon: 'users-round', tone: 'green', href: '#groups' })}
+            ${statTile({ label: 'Kurslar', value: courses.length, icon: 'book-open', tone: 'violet', href: '#courses' })}
+        </div>
+
+        <div class="split split-2 mt-6">
+            <div class="stack">
+                ${pending.length > 0 ? sectionCard('Tasdiqlash kutilmoqda', `
+                    <div class="stack-sm">
+                        ${pending.slice(0, 5).map(p => `
+                            <div class="card card-pad-sm">
+                                <div class="d-flex items-start gap-3">
+                                    ${avatarHtml({ ism: p.author }, 'avatar-sm')}
+                                    <div class="grow" style="min-width:0">
+                                        <div class="list-title">${esc(p.title || '(sarlavsiz)')}</div>
+                                        <div class="list-sub clamp-2">${esc(p.content || '')}</div>
+                                        <div class="t-xs c-soft mt-1">${esc(p.author || '')} · ${esc(p.date || '')}</div>
                                     </div>
                                 </div>
-                              ` : `<p class="whitespace-pre-wrap">${m.text}</p>`}
-                            <div class="msg-time opacity-60 mt-1 ${isMe ? 'text-right' : 'text-left'}">${m.time}</div>
+                                <div class="d-flex gap-2 mt-3">
+                                    <button class="btn btn-success btn-sm grow" onclick="window.__apprPost(${p.id},true)">
+                                        <i data-lucide="check"></i> Tasdiqlash
+                                    </button>
+                                    <button class="btn btn-danger btn-sm grow" onclick="window.__apprPost(${p.id},false)">
+                                        <i data-lucide="x"></i> Rad etish
+                                    </button>
+                                </div>
+                            </div>`).join('')}
+                    </div>`, { icon: '<i data-lucide="shield-check"></i>', sub: `${pending.length} post`, actions: '<button class="btn btn-ghost btn-sm" onclick="go(\'posts\')">Barchasi <i data-lucide="arrow-right"></i></button>' }) : ''}
+
+                ${sectionCard('So‘nggi postlar', posts.length === 0
+                    ? emptyState('newspaper', 'Postlar yo‘q')
+                    : `<div class="list list-flush">
+                        ${posts.slice(0, 6).map(p => `
+                            <div class="list-row">
+                                ${avatarHtml({ ism: p.author }, 'avatar-sm')}
+                                <div class="grow" style="min-width:0">
+                                    <div class="list-title truncate">${esc(p.title || '(sarlavsiz)')}</div>
+                                    <div class="list-sub">${esc(p.author || '')} · ${esc(p.date || '')}</div>
+                                </div>
+                                <span class="badge ${p.approved ? 'badge-green' : 'badge-amber'}">${p.approved ? 'tasdiqlangan' : 'kutilmoqda'}</span>
+                            </div>`).join('')}
+                    </div>`, { icon: '<i data-lucide="newspaper"></i>' })}
+            </div>
+
+            <div class="stack">
+                ${sectionCard('Tezkor ko‘rsatkichlar', `
+                    <div class="stack-sm">
+                        <button class="list-row click w-full text-left" onclick="go('users')">
+                            <div class="card-icon navy" style="width:32px;height:32px"><i data-lucide="users"></i></div>
+                            <div class="grow"><div class="list-title">Foydalanuvchilar</div></div>
+                            <span class="badge">${users.length}</span>
+                        </button>
+                        <button class="list-row click w-full text-left" onclick="go('attendance')">
+                            <div class="card-icon green" style="width:32px;height:32px"><i data-lucide="user-check"></i></div>
+                            <div class="grow"><div class="list-title">Davomat</div></div>
+                            <i data-lucide="chevron-right" style="color:var(--gray-300)"></i>
+                        </button>
+                        <button class="list-row click w-full text-left" onclick="go('reports')">
+                            <div class="card-icon" style="width:32px;height:32px"><i data-lucide="bar-chart-3"></i></div>
+                            <div class="grow"><div class="list-title">Hisobotlar</div></div>
+                            <i data-lucide="chevron-right" style="color:var(--gray-300)"></i>
+                        </button>
+                        <button class="list-row click w-full text-left" onclick="go('support')">
+                            <div class="card-icon ${openTickets.length ? 'red' : ''}" style="width:32px;height:32px"><i data-lucide="life-buoy"></i></div>
+                            <div class="grow"><div class="list-title">Ochilgan ticketlar</div></div>
+                            <span class="badge ${openTickets.length ? 'badge-red' : ''}">${openTickets.length}</span>
+                        </button>
+                    </div>`, { icon: '<i data-lucide="keyboard"></i>' })}
+            </div>
+        </div>`;
+}
+
+async function d_director() {
+    const [users, groups, grades, att] = await Promise.all([
+        getUsers(), getGroups(), getGrades(), getAttendance().catch(() => []),
+    ]);
+    const students = users.filter(u => u.role === 'student');
+    const teachers = users.filter(u => u.role === 'ustoz');
+    const avgGrade = grades.length
+        ? (grades.reduce((a, g) => a + num(g.value), 0) / grades.length).toFixed(2) : '—';
+    const totalXp = students.reduce((a, u) => a + num(u.points), 0);
+
+    return `
+        ${heroPanel(STATE.user, ['Direktor paneli', `${groups.length} guruh`, `${students.length} talaba`], `
+            <div class="d-flex gap-2 mt-5 flex-wrap">
+                <button class="btn btn-white btn-sm" onclick="go('reports')"><i data-lucide="bar-chart-3"></i> Hisobotlar</button>
+                <button class="btn btn-white btn-sm" onclick="go('analytics')"><i data-lucide="trending-up"></i> Analitika</button>
+            </div>`)}
+
+        <div class="grid grid-4 mt-6">
+            ${statTile({ label: 'Talabalar', value: students.length, icon: 'users', href: '#users' })}
+            ${statTile({ label: 'O‘qituvchilar', value: teachers.length, icon: 'user-cog', tone: 'accent', href: '#users' })}
+            ${statTile({ label: 'O‘rtacha baho', value: avgGrade, icon: 'graduation-cap', tone: 'green' })}
+            ${statTile({ label: 'Jami XP', value: totalXp, icon: 'zap', tone: 'amber' })}
+        </div>
+
+        <div class="split split-2 mt-6">
+            ${sectionCard('Guruhlar kesimi', groups.length === 0
+                ? emptyState('users-round', 'Guruhlar yo‘q')
+                : `<div class="table-wrap"><table class="table responsive">
+                    <thead><tr><th>Guruh</th><th data-label="Talaba">Talaba</th><th data-label="Mashg‘ulot">Mashg‘ulot</th></tr></thead>
+                    <tbody>${groups.map(g => `
+                        <tr>
+                            <td data-label="Guruh"><span class="cell-main">${esc(g.name)}</span></td>
+                            <td data-label="Talaba"><span class="badge badge-blue">${(g.studentIds || []).length}</span></td>
+                            <td data-label="Mashg‘ulot"><span class="cell-sub">${(g.schedule || []).length} ta</span></td>
+                        </tr>`).join('')}</tbody>
+                </table></div>`, { icon: '<i data-lucide="users-round"></i>' })}
+
+            ${sectionCard('Davomat statistikasi', att.length === 0
+                ? emptyState('user-check', 'Davomat yozuvlari yo‘q')
+                : (() => {
+                    let p = 0, a = 0;
+                    att.forEach(r => Object.values(r.records || {}).forEach(v => v === 'present' ? p++ : a++));
+                    const total = p + a;
+                    const pct = total ? Math.round((p / total) * 100) : 0;
+                    return `
+                    <div class="stack">
+                        <div class="d-flex items-end justify-between">
+                            <div>
+                                <div class="stat-value c-green">${pct}%</div>
+                                <div class="stat-label">Davomat darajasi</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="fw-8 t-lg c-green">${p}</div>
+                                <div class="t-xs c-soft">kelgan</div>
+                            </div>
                         </div>
+                        ${progressBar(pct, pct >= 70 ? 'green' : 'red')}
+                        <div class="d-flex items-center justify-between mt-2">
+                            <span class="t-sm c-muted">Kelmagan</span>
+                            <span class="fw-8 t-sm c-red">${a}</span>
+                        </div>
+                    </div>`;
+                })(), { icon: '<i data-lucide="user-check"></i>' })}
+        </div>`;
+}
+
+// ── Ota-ona uchun qulaylik: davomat holatlari va ularning belgilari ──
+const ATT_STATUS = {
+    present:            { label: 'Kelgan',      badge: 'badge-green' },
+    late:               { label: 'Kechikdi',    badge: 'badge-amber' },
+    absent:             { label: 'Kelmadi',     badge: 'badge-red' },
+    absent_unexcused:   { label: 'Sababsiz',    badge: 'badge-red' },
+    excused:            { label: 'Sababli',     badge: 'badge-blue' },
+};
+const attMeta = (st) => ATT_STATUS[st] || { label: st || '—', badge: '' };
+
+/** Davomat oxirgi N kuni topadi — ota-ona uchun "bugungi holat". */
+function attStreak(records) {
+    let n = 0;
+    for (const r of records) {                 // records — eng yangidan eskiya
+        if (r.status === 'present' || r.status === 'late') n++;
+        else break;
+    }
+    return n;
+}
+
+async function d_parent() {
+    // Bitta so'rovda bolaning barcha natijalari — 3 ta alohida so'rov
+    // o'rniga bittasi (tezroq, va kelganda yangi bo'limlar ham qo'shiladi).
+    const rep = await getParentReport().catch((e) => {
+        if (e?.status === 404) return null;
+        throw e;
+    });
+
+    if (!rep) {
+        return pageHead('Boshqaruv paneli', 'Bolangizga ulangan ma’lumot topilmadi')
+            + emptyState('user-round-x', 'Bola bog‘lanmagan', 'Administrator bilan bog‘lanishni so‘rang.');
+    }
+
+    const child = await getParentChild().catch(() => null);
+    const gs = rep.gradeStats || {};
+    const att = rep.attendance || { records: [], byMonth: [] };
+    const records = att.records || [];
+    const attPct = att.percent || 0;
+    const s = child ? userStats(child) : { lessonsDone: 0 };
+    const streak = attStreak(records);
+    const avg = gs.avg || 0;
+
+    return `
+        ${heroPanel(child || { ism: STATE.user.ism }, [child?.groupName || 'Guruh birilmagan', 'Bola paneli'], `
+            <div class="hero-badges">
+                <span class="badge hot"><i data-lucide="book-open-check"></i> ${s.lessonsDone} dars</span>
+                ${avg ? `<span class="badge"><i data-lucide="graduation-cap"></i> o‘rtacha ${avg}</span>` : ''}
+            </div>`)}
+
+        <div class="grid grid-4 mt-6">
+            ${statTile({ label: 'Ballar', value: child?.points || 0, icon: 'zap', tone: 'accent' })}
+            ${statTile({ label: 'Darslar', value: s.lessonsDone, icon: 'book-open-check', foot: `${rep.courses.length} ta kurs` })}
+            ${statTile({
+                label: 'Davomat', value: `${attPct}%`, icon: 'user-check',
+                tone: attPct >= 80 ? 'green' : attPct >= 60 ? 'amber' : 'red',
+                foot: `${att.present}/${att.total} kun`,
+            })}
+            ${statTile({
+                label: 'O‘rtacha baho', value: avg || '—', icon: 'graduation-cap',
+                tone: avg >= 4.5 ? 'green' : avg >= 3.5 ? 'amber' : 'red',
+                foot: `${gs.total || 0} ta baho`,
+            })}
+        </div>
+
+        <div class="mt-6 stack">
+            ${parentGradesCard(rep)}
+            ${parentAttendanceCard(att, records)}
+            ${parentCoursesCard(rep.courses || [])}
+        </div>`;
+}
+
+/** Bolaning BARCHA baholari + taqsimoti. */
+function parentGradesCard(rep) {
+    const grades = rep.grades || [];
+    const gs = rep.gradeStats || {};
+    const dist = [
+        { k: 5, n: gs.g5 || 0, c: 'badge-green' },
+        { k: 4, n: gs.g4 || 0, c: 'badge-blue' },
+        { k: 3, n: gs.g3 || 0, c: 'badge-amber' },
+        { k: 2, n: gs.g2 || 0, c: 'badge-red' },
+    ];
+
+    const body = grades.length === 0
+        ? emptyState('graduation-cap', 'Hali baho qo‘yilmagan', 'O‘qituvchi baho qo‘yganida shu yerda ko‘rinadi.')
+        : `
+        <div class="grid grid-4 mb-5">
+            ${dist.map(d => `
+                <div class="stat" style="text-align:center;padding:14px">
+                    <div class="stat-value">${d.n}</div>
+                    <div class="mt-2"><span class="badge ${d.c}">${d.k} baho</span></div>
+                </div>`).join('')}
+        </div>
+
+        <div class="table-wrap">
+            <table class="table responsive">
+                <thead><tr>
+                    <th data-label="Sana">Sana</th>
+                    <th data-label="Kurs">Kurs</th>
+                    <th data-label="O‘qituvchi">O‘qituvchi</th>
+                    <th data-label="Baho" class="text-center">Baho</th>
+                    <th data-label="Izoh">Izoh</th>
+                </tr></thead>
+                <tbody>
+                    ${grades.map(g => `
+                        <tr>
+                            <td data-label="Sana"><span class="t-xs">${esc(g.date || '—')}</span></td>
+                            <td data-label="Kurs"><span class="fw-7">${esc(g.courseTitle || '—')}</span></td>
+                            <td data-label="O‘qituvchi"><span class="t-xs">${esc(g.teacher || '—')}</span></td>
+                            <td data-label="Baho" class="text-center">${gradePill(g.value)}</td>
+                            <td data-label="Izoh"><span class="t-xs">${esc(g.comment || '—')}</span></td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>`;
+
+    return sectionCard('Baholar', body, {
+        icon: '<i data-lucide="graduation-cap"></i>',
+        sub: gs.total ? `${gs.total} ta baho · o‘rtacha ${gs.avg} · eng yuqori ${gs.best}` : 'Hali baho yo‘q',
+    });
+}
+
+/** To‘liq davomat: jamlama, oylar kesimi, saralangan tarix. */
+function parentAttendanceCard(att, records) {
+    const months = att.byMonth || [];
+    const tone = att.percent >= 80 ? 'green' : att.percent >= 60 ? 'amber' : 'red';
+
+    const summary = `
+        <div class="grid grid-4 mb-5">
+            ${[
+                { label: 'Kelgan', n: att.present, i: 'user-check', c: 'green' },
+                { label: 'Kechikdi', n: att.late || 0, i: 'clock', c: 'amber' },
+                { label: 'Kelmadi', n: (att.absent || 0) + (att.excused || 0), i: 'user-x', c: 'red' },
+                { label: 'Umumiy', n: att.total, i: 'calendar-days', c: '' },
+            ].map(x => statTile({ label: x.label, value: x.n, icon: x.i, tone: x.c })).join('')}
+        </div>`;
+
+    const byMonth = months.length ? `
+        <div class="card card-pad mb-5" style="box-shadow:none;background:var(--surface-2)">
+            <div class="card-title mb-4"><i data-lucide="calendar-range"></i> Oylar bo‘yicha</div>
+            <div class="stack-sm">
+                ${months.map(m => `
+                    <div>
+                        <div class="d-flex items-center justify-between gap-3 mb-2">
+                            <span class="t-xs fw-7">${esc(m.month)}</span>
+                            <span class="t-xs">${m.present}/${m.total} kun · ${m.percent}%</span>
+                        </div>
+                        ${progressBar(m.percent, m.percent >= 80 ? 'green' : m.percent >= 60 ? 'amber' : 'red')}
+                    </div>`).join('')}
+            </div>
+        </div>` : '';
+
+    const history = records.length ? `
+        <div class="d-flex items-center gap-2 flex-wrap mb-4" id="p-att-filters">
+            ${[['all', 'Barchasi'], ['present', 'Kelgan'], ['late', 'Kechikdi'],
+               ['absent', 'Kelmadi'], ['excused', 'Sababli']].map(([k, l], i) =>
+                `<button class="btn ${i === 0 ? 'btn-primary' : 'btn-outline'} btn-sm" data-st="${k}"
+                         onclick="window.__parentAttFilter('${k}',this)">${l}</button>`).join('')}
+        </div>
+        <div class="list list-flush" id="p-att-list">
+            ${records.map(r => {
+                const m = attMeta(r.status);
+                return `
+                <div class="list-row" data-st="${esc(r.status || '')}">
+                    <div style="min-width:0">
+                        <div class="fw-7 t-sm">${esc(r.date || '—')}</div>
                     </div>
+                    <span class="badge ${m.badge}">${m.label}</span>
                 </div>`;
             }).join('')}
-            ${msgs.length === 0 ? '<div class="text-center py-20 text-slate-300 font-bold">Xabarlar hali mavjud emas. Birinchi bo\'lib yozing!</div>' : ''}
+        </div>` : emptyState('calendar-x', 'Davomat yozuvlari yo‘q', 'Darslar boshlanganda yozuvlar shu yerda paydo bo‘ladi.');
+
+    return sectionCard('Davomat', summary + byMonth + history, {
+        icon: '<i data-lucide="calendar-check"></i>',
+        sub: att.total ? `${att.percent}% · ${att.present}/${att.total} kun` : 'Hali yozuv yo‘q',
+    });
+}
+
+/** Kurslar bo‘yicha natija. */
+function parentCoursesCard(courses) {
+    const body = courses.length === 0
+        ? emptyState('book-open', 'Kurslar boshlanmagan', 'Bola kursga yozilgach natijalar shu yerda ko‘rinadi.')
+        : `<div class="stack-sm">
+            ${courses.map(c => `
+                <div class="card card-pad" style="box-shadow:none;border:1px solid var(--border)">
+                    <div class="d-flex items-center justify-between gap-3 mb-3">
+                        <div class="fw-7 t-sm truncate" style="min-width:0">${esc(c.title)}</div>
+                        <span class="badge ${c.percent >= 100 ? 'badge-green' : c.percent > 0 ? 'badge-blue' : ''}">${c.percent}%</span>
+                    </div>
+                    ${progressBar(c.percent, c.percent >= 80 ? 'green' : c.percent > 0 ? '' : 'amber')}
+                    <div class="t-xs mt-2">${c.completed}/${c.totalLessons} dars yakunlangan</div>
+                </div>`).join('')}
+        </div>`;
+
+    return sectionCard('Kurslar', body, {
+        icon: '<i data-lucide="book-open"></i>',
+        sub: `${courses.length} ta kurs`,
+    });
+}
+
+window.__parentAttFilter = (st, btn) => {
+    document.querySelectorAll('#p-att-filters .btn').forEach(b => {
+        b.classList.remove('btn-primary');
+        b.classList.add('btn-outline');
+    });
+    btn.classList.add('btn-primary');
+    btn.classList.remove('btn-outline');
+    document.querySelectorAll('#p-att-list > .list-row').forEach(row => {
+        row.classList.toggle('hidden', !(st === 'all' || row.dataset.st === st));
+    });
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: courses
+// ══════════════════════════════════════════════════════════════════════
+async function v_courses() {
+    const courses = await getCourses();
+    const canEdit = isStaff();
+    const u = STATE.user;
+
+    return `
+        ${pageHead('Kurslar', `${courses.length} ta mavjud kurs`, canEdit
+            ? `<button class="btn btn-primary" onclick="openCourseEditor()"><i data-lucide="plus"></i> Yangi kurs</button>`
+            : '')}
+        <div class="d-flex items-center gap-3 mb-5 flex-wrap">
+            <div class="input-icon grow" style="max-width:340px">
+                <i data-lucide="search"></i>
+                <input class="input" id="course-search" placeholder="Kurs nomini qidirish…" oninput="window.__filterCourses()">
+            </div>
+            <div class="d-flex gap-2 flex-wrap" id="course-filters">
+                ${['Barchasi', 'Ochiq', 'Yopiq'].map((f, i) =>
+                    `<button class="btn ${i === 0 ? 'btn-primary' : 'btn-outline'} btn-sm" data-filter="${f}" onclick="window.__setCourseFilter('${f}',this)">${f}</button>`).join('')}
+            </div>
         </div>
+        <div id="courses-grid" class="grid grid-auto"></div>`;
+}
 
-        <div class="p-4 border-t border-slate-100 relative bg-white">
-            <div id="image-preview" class="hidden image-preview-container animate-zoom"></div>
-            <div id="voice-preview" class="hidden voice-preview-container bg-indigo-50 p-4 rounded-2xl mb-4 animate-slide-up flex items-center justify-between">
-                <div class="flex items-center gap-4">
-                    <div class="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center animate-pulse">
-                        <i data-lucide="mic" class="w-5 h-5"></i>
-                    </div>
-                    <div>
-                        <p class="text-sm font-black text-slate-800">Ovoz yozilmoqda...</p>
-                        <p id="voice-timer" class="text-xs font-bold text-indigo-600">00:00</p>
-                    </div>
-                </div>
-                <div class="flex gap-2">
-                    <button onclick="cancelRecording()" class="p-3 bg-red-100 text-red-500 rounded-xl hover:bg-red-200 transition">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                    </button>
-                    <button onclick="stopRecording()" class="p-4 bg-indigo-600 text-white rounded-xl shadow-lg hover:bg-indigo-700 transition">
-                        <i data-lucide="check" class="w-5 h-5"></i>
-                    </button>
-                </div>
-            </div>
+window.__filterCourses = () => {
+    const q = (document.getElementById('course-search')?.value || '').toLowerCase();
+    const active = document.querySelector('#course-filters .btn-primary')?.dataset.filter || 'Barchasi';
+    document.querySelectorAll('#courses-grid > *').forEach(el => {
+        const okQ = !q || (el.dataset.title || '').includes(q);
+        const okF = active === 'Barchasi' || el.dataset.status === active;
+        el.classList.toggle('hidden', !(okQ && okF));
+    });
+};
 
-            <div id="emoji-picker" class="hidden emoji-picker">
-                ${['😊','😂','😍','😎','🤔','🙌','🔥','✨','👍','💯','📚','💻','✅','❌','⚠️','🚀','🏆','⭐'].map(e => `<span class="emoji-btn" onclick="addEmoji('${e}')">${e}</span>`).join('')}
-            </div>
-            
-            <form onsubmit="sendChatMessage(event)" class="flex gap-3 items-center">
-                <div class="flex gap-1.5">
-                    <label id="chat-img-btn" class="p-3.5 bg-slate-50 text-slate-400 rounded-2xl cursor-pointer hover:bg-slate-100 hover:text-indigo-600 transition-all active:scale-90">
-                        <i data-lucide="image" class="w-6 h-6"></i>
-                        <input type="file" id="chat-image-input" class="hidden" accept="image/*" onchange="previewChatImage(this)">
-                    </label>
-                    <button type="button" onclick="toggleEmojiPicker()" id="emoji-trigger" class="p-3.5 bg-slate-50 text-slate-400 rounded-2xl hover:bg-slate-100 hover:text-amber-500 transition-all active:scale-90">
-                        <i data-lucide="smile" class="w-6 h-6"></i>
-                    </button>
-                    <button type="button" id="voice-btn" onmousedown="startRecording()" onmouseup="stopRecording()" class="p-3.5 bg-slate-50 text-slate-400 rounded-2xl hover:bg-indigo-50 hover:text-indigo-600 transition-all active:scale-90 touch-none">
-                        <i data-lucide="mic" class="w-6 h-6"></i>
-                    </button>
+window.__setCourseFilter = (f, btn) => {
+    document.querySelectorAll('#course-filters .btn').forEach(b => {
+        b.classList.remove('btn-primary');
+        b.classList.add('btn-outline');
+    });
+    btn.classList.add('btn-primary');
+    btn.classList.remove('btn-outline');
+    window.__filterCourses();
+};
+
+window.__openCourse = (id) => { STATE.activeCourseId = id; window.location.hash = 'course-detail'; };
+
+window.__delCourse = async (id) => {
+    if (!confirm('Kursni va barcha darslarini o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/courses/${id}`); showToast('Kurs o‘chirildi', 'success'); STATE.activeCourseId = null; renderView('courses'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+function loadCoursesGrid() {
+    mount('courses-grid', async () => {
+        const courses = await getCourses();
+        if (courses.length === 0) {
+            return emptyState('book-open', 'Kurslar yo‘q', isStaff()
+                ? 'Birinchi kursni yaratish uchun yuqoridagi tugmani bosing.'
+                : 'Hozircha mavjud kurs kiritilmagan.');
+        }
+        return courses.map(c => {
+            const pct = courseProgress(c);
+            const done = courseCompleted(c).length;
+            const canEdit = isStaff();
+            return `
+            <article class="card card-pad card-hover" data-title="${esc(c.title.toLowerCase())}" data-status="${esc(c.status || '')}">
+                <div class="d-flex items-start justify-between gap-3 mb-4">
+                    <div class="card-icon ${pct >= 100 ? 'green' : ''}">
+                        <i data-lucide="${pct >= 100 ? 'badge-check' : 'book-open'}"></i>
+                    </div>
+                    <div class="d-flex items-center gap-2">
+                        <span class="badge ${c.status === 'Ochiq' ? 'badge-green' : c.status === 'Yopiq' ? 'badge-red' : ''}">${esc(c.status || 'Ochiq')}</span>
+                        ${canEdit ? `
+                        <button class="btn-icon sm" onclick="window.__openCourse(${c.id});setTimeout(()=>window.__editCourse(${c.id}),50)" aria-label="Tahrirlash">
+                            <i data-lucide="pencil"></i>
+                        </button>` : ''}
+                    </div>
                 </div>
-                
-                <div class="flex-1 relative">
-                    <input id="chat-input" autocomplete="off" placeholder="Xabar yozing..." class="w-full bg-slate-50 border-none px-6 py-4 rounded-2xl font-semibold outline-none focus:ring-2 ring-indigo-100 transition-all">
+                <h3 class="tile-title" style="font-size:1.0625rem">${esc(c.title)}</h3>
+                <p class="tile-sub clamp-2 mt-2">${esc(c.description || 'Tavsif kiritilmagan')}</p>
+                <div class="d-flex items-center gap-2 mt-3 flex-wrap">
+                    <span class="badge badge-blue">${esc(c.category || '')}</span>
+                    <span class="t-xs c-soft fw-6">${(c.lessons || []).length} dars</span>
                 </div>
-                
-                <button class="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all">
-                    <i data-lucide="send" class="w-6 h-6"></i>
+                <div class="mt-4">
+                    <div class="d-flex items-center justify-between mb-2">
+                        <span class="t-xs fw-8 c-soft upper tracking-wider">Progress</span>
+                        <span class="t-xs fw-8 c-primary">${pct}%</span>
+                    </div>
+                    ${progressBar(pct, pct >= 100 ? 'green' : '')}
+                    ${done > 0 ? `<div class="t-xs c-muted mt-2">${done} ta dars tugatilgan</div>` : ''}
+                </div>
+                <button class="btn ${pct > 0 && pct < 100 ? 'btn-primary' : 'btn-soft'} btn-block mt-4" onclick="window.__openCourse(${c.id})">
+                    ${pct > 0 && pct < 100 ? 'Davom ettirish' : pct >= 100 ? 'Ko‘rish' : 'Boshlash'}
+                    <i data-lucide="arrow-right"></i>
                 </button>
-            </form>
+            </article>`;
+        }).join('');
+    });
+}
+
+window.__editCourse = async (id) => {
+    const courses = await getCourses();
+    const c = courses.find(x => x.id === id);
+    if (c) openCourseEditor(c);
+    else showToast('Kurs topilmadi', 'error');
+};
+
+async function v_cdetail() {
+    const courses = await getCourses();
+    const c = courses.find(x => x.id === STATE.activeCourseId);
+    if (!c) {
+        return pageHead('Kurs', '')
+            + emptyState('search-x', 'Kurs topilmadi', '', `<button class="btn btn-primary" onclick="go('courses')">Kurslarga qaytish</button>`);
+    }
+
+    const done = courseCompleted(c);
+    const pct = courseProgress(c);
+    const canEdit = isStaff();
+    const u = STATE.user;
+    const total = (c.lessons || []).length;
+
+    return `
+        <button class="btn btn-ghost btn-sm mb-4" onclick="go('courses')"><i data-lucide="arrow-left"></i> Kurslar</button>
+        ${pageHead(c.title, c.description || '', `
+            ${canEdit ? `
+            <button class="btn btn-outline btn-sm" onclick="window.__editCourse(${c.id})"><i data-lucide="pencil"></i> Tahrirlash</button>
+            <button class="btn btn-danger btn-sm" onclick="window.__delCourse(${c.id})"><i data-lucide="trash-2"></i> O‘chirish</button>` : ''}`)}
+
+        <div class="grid grid-4 mb-6">
+            ${statTile({ label: 'Darslar', value: total, icon: 'book-open' })}
+            ${statTile({ label: 'Tugatilgan', value: done.length, icon: 'book-open-check', tone: 'green' })}
+            ${statTile({ label: 'Progress', value: `${pct}%`, icon: 'trending-up', tone: 'accent' })}
+            ${statTile({ label: 'Kategoriya', value: `<span class="t-lg">${esc(c.category || '—')}</span>`, icon: 'tag' })}
         </div>
-    </div>`;
+
+        ${total === 0 ? emptyState('file-plus', 'Darslar qo‘shilmagan',
+            canEdit ? 'Kursni tahrirlab dars qo‘shing.' : 'Bu kursga hali dars qo‘shilmagan.')
+            : `<div class="stack-sm">
+                ${c.lessons.map((l, i) => {
+                    const isDone = done.includes(l.id);
+                    return `
+                    <button class="card card-pad-sm card-hover" style="text-align:left;width:100%;display:flex;align-items:center;gap:14px"
+                            onclick="window.__openLesson(${l.id})">
+                        <div class="rank-medal ${isDone ? 'gold' : ''}">${isDone
+                            ? '<i data-lucide="check" style="width:16px;height:16px"></i>'
+                            : i + 1}</div>
+                        <div class="grow" style="min-width:0">
+                            <div class="list-title truncate">${esc(l.title)}</div>
+                            <div class="list-sub">${esc(l.topic || 'Mavzu ko‘rsatilmagan')}</div>
+                        </div>
+                        ${l.videoUrl ? '<i data-lucide="video" style="width:18px;height:18px;color:var(--gray-300)"></i>' : ''}
+                        <i data-lucide="play-circle" style="width:20px;height:20px;color:var(--primary)"></i>
+                    </button>`;
+                }).join('')}
+            </div>`}
+
+        ${!u.progress || !Object.keys(u.progress).length ? `
+        <div class="callout blue mt-6"><i data-lucide="info"></i>
+            <div>Darsni oching va kamida <b>20 daqiqa</b> ishlab turing — shunda <b>+7 XP</b> olasiz va
+            kunlik limitga qadar 50 XP yig‘ishingiz mumkin.</div>
+        </div>` : ''}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: users
+// ══════════════════════════════════════════════════════════════════════
+async function v_users() {
+    const [users, groups] = await Promise.all([getUsers(), getGroups()]);
+    const canDelete = STATE.user.role === 'admin';
+    const canRoles = STATE.user.role === 'admin';
+
+    window.__usersCache = users;
+    window.__groupsCache = groups;
+
+    return `
+        ${pageHead('Foydalanuvchilar', `${users.length} ta ro‘yxatdan o‘tgan`, canDelete
+            ? `<button class="btn btn-primary" onclick="window.__openUserEditor()"><i data-lucide="user-plus"></i> Qo‘shish</button>` : '')}
+
+        <div class="d-flex items-center gap-3 mb-5 flex-wrap">
+            <div class="input-icon grow" style="max-width:340px">
+                <i data-lucide="search"></i>
+                <input class="input" id="user-search" placeholder="Ism yoki email…" oninput="window.__filterUsers()">
+            </div>
+            <div class="d-flex gap-2 flex-wrap" id="user-filters">
+                ${['Barchasi', 'Talaba', 'O‘qituvchi', 'Admin'].map((f, i) =>
+                    `<button class="btn ${i === 0 ? 'btn-primary' : 'btn-outline'} btn-sm" data-filter="${f}" onclick="window.__setUserFilter('${f}',this)">${f}</button>`).join('')}
+            </div>
+        </div>
+
+        <section class="card">
+            <div class="table-wrap">
+                <table class="table responsive" id="users-table">
+                    <thead>
+                        <tr>
+                            <th>Foydalanuvchi</th>
+                            <th data-label="Rol">Rol</th>
+                            <th data-label="Guruh">Guruh</th>
+                            <th data-label="Ball">Ball</th>
+                            <th class="cell-act"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${users.map(u => {
+                            const g = groups.find(x => x.id === u.groupId);
+                            return `
+                            <tr data-role="${esc(u.role)}" data-name="${esc((u.ism + ' ' + u.email).toLowerCase())}">
+                                <td data-label="Foydalanuvchi">
+                                    <div class="d-flex items-center gap-3">
+                                        ${avatarHtml(u, 'avatar-sm')}
+                                        <div style="min-width:0">
+                                            <div class="cell-main truncate">${esc(u.ism)}</div>
+                                            <div class="cell-sub truncate">${esc(u.email)}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td data-label="Rol">
+                                    ${canRoles ? `
+                                    <select class="select" style="width:auto;padding:6px 30px 6px 10px;font-size:.75rem"
+                                            onchange="window.__changeRole(${u.id},this.value)">
+                                        ${Object.keys(ROLE_LABELS).map(r =>
+                                            `<option value="${r}" ${u.role === r ? 'selected' : ''}>${roleLabel(r)}</option>`).join('')}
+                                    </select>` : `<span class="badge ${ROLE_BADGE[u.role] || ''}">${roleLabel(u.role)}</span>`}
+                                </td>
+                                <td data-label="Guruh">
+                                    <span class="cell-sub">${esc(g?.name || '—')}</span>
+                                </td>
+                                <td data-label="Ball"><span class="badge badge-orange">${num(u.points)} XP</span></td>
+                                <td class="cell-act" data-label="">
+                                    <div class="d-flex gap-1 justify-end">
+                                        <button class="btn-icon sm" onclick="window.__openUserEditor(${u.id})" aria-label="Tahrirlash">
+                                            <i data-lucide="pencil"></i>
+                                        </button>
+                                        ${canDelete && u.id !== STATE.user.id ? `
+                                        <button class="btn-icon sm" onclick="window.__delUser(${u.id})" aria-label="O’chirish" style="color:var(--red-500)">
+                                            <i data-lucide="trash-2"></i>
+                                        </button>` : ''}
+                                    </div>
+                                </td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </section>`;
+}
+
+window.__filterUsers = () => {
+    const q = (document.getElementById('user-search')?.value || '').toLowerCase();
+    const active = document.querySelector('#user-filters .btn-primary')?.dataset.filter || 'Barchasi';
+    const map = { Talaba: 'student', 'O‘qituvchi': 'ustoz', Admin: 'admin' };
+    document.querySelectorAll('#users-table tbody tr').forEach(tr => {
+        const okQ = !q || (tr.dataset.name || '').includes(q);
+        const okF = active === 'Barchasi' || tr.dataset.role === map[active];
+        tr.classList.toggle('hidden', !(okQ && okF));
+    });
 };
 
-window.playVoice = (src, btn) => {
-    const audio = new Audio(src);
-    const icon = btn.querySelector('i');
-    const bar = btn.parentElement.querySelector('.voice-progress');
-    
-    if (window.CURRENT_AUDIO === audio && !audio.paused) {
-        audio.pause();
-        return;
-    }
-    
-    if (window.CURRENT_AUDIO) window.CURRENT_AUDIO.pause();
-    window.CURRENT_AUDIO = audio;
-    
-    audio.play();
-    btn.innerHTML = '<i data-lucide="pause" class="w-5 h-5"></i>';
-    safeLucide(btn);
-    
-    audio.ontimeupdate = () => {
-        const p = (audio.currentTime / audio.duration) * 100;
-        bar.style.width = p + '%';
-    };
-    
-    audio.onended = () => {
-        btn.innerHTML = '<i data-lucide="play" class="w-5 h-5"></i>';
-        bar.style.width = '0%';
-        safeLucide(btn);
-    };
+window.__setUserFilter = (f, btn) => {
+    document.querySelectorAll('#user-filters .btn').forEach(b => {
+        b.classList.remove('btn-primary'); b.classList.add('btn-outline');
+    });
+    btn.classList.add('btn-primary'); btn.classList.remove('btn-outline');
+    window.__filterUsers();
 };
 
-let RECORD_TIMER = null;
-let RECORD_SEC = 0;
-
-window.startRecording = async () => {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        VOICE_RECORDER = new MediaRecorder(stream);
-        VOICE_CHUNKS = [];
-        IS_RECORDING = true;
-        
-        VOICE_RECORDER.ondataavailable = (e) => VOICE_CHUNKS.push(e.data);
-        VOICE_RECORDER.onstop = async () => {
-            VOICE_BLOB = new Blob(VOICE_CHUNKS, { type: 'audio/webm' });
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const base64 = e.target.result;
-                const duration = formatVoiceTime(RECORD_SEC);
-                sendVoiceMessage(base64, duration);
-            };
-            reader.readAsDataURL(VOICE_BLOB);
-            stream.getTracks().forEach(t => t.stop());
-        };
-        
-        VOICE_RECORDER.start();
-        document.getElementById('voice-preview').classList.remove('hidden');
-        RECORD_SEC = 0;
-        RECORD_TIMER = setInterval(() => {
-            RECORD_SEC++;
-            document.getElementById('voice-timer').innerText = formatVoiceTime(RECORD_SEC);
-        }, 1000);
-        
-    } catch (err) {
-        showToast("Mikrofonga ruxsat berilmagan", "error");
-    }
+window.__changeRole = async (uid, role) => {
+    try { await api_patch(`/users/${uid}`, { role }); showToast('Rol yangilandi', 'success'); }
+    catch (e) { showToast(e.message, 'error'); renderView('users'); }
 };
 
-window.stopRecording = () => {
-    if (!VOICE_RECORDER || VOICE_RECORDER.state === 'inactive') return;
-    VOICE_RECORDER.stop();
-    IS_RECORDING = false;
-    clearInterval(RECORD_TIMER);
-    document.getElementById('voice-preview').classList.add('hidden');
+window.__delUser = async (uid) => {
+    const u = (window.__usersCache || []).find(x => x.id === uid);
+    if (!confirm(`${u?.ism || 'Foydalanuvchi'} ni o‘chirishni tasdiqlaysizmi?`)) return;
+    try { await api_del(`/users/${uid}`); showToast('Foydalanuvchi o‘chirildi', 'success'); renderView('users'); }
+    catch (e) { showToast(e.message, 'error'); }
 };
 
-window.cancelRecording = () => {
-    if (!VOICE_RECORDER) return;
-    VOICE_RECORDER.onstop = null;
-    VOICE_RECORDER.stop();
-    IS_RECORDING = false;
-    clearInterval(RECORD_TIMER);
-    document.getElementById('voice-preview').classList.add('hidden');
-    showToast("Ovoz yozish bekor qilindi", "info");
+window.__openUserEditor = async (uid) => {
+    const u = uid ? (window.__usersCache || []).find(x => x.id === uid) : null;
+    if (uid && !u) { showToast('Foydalanuvchi topilmadi', 'error'); return; }
+    const groups = window.__groupsCache || await getGroups();
+    const isNew = !u;
+
+    openModal(modalShell({
+        icon: '<i data-lucide="user-cog"></i>',
+        title: isNew ? 'Yangi foydalanuvchi' : esc(u.ism),
+        body: `
+            <form id="form-user" class="stack" onsubmit="return window.__svUser(event, ${isNew ? 'null' : uid})">
+                <div class="field">
+                    <label class="label">Ism va familiya</label>
+                    <input class="input" name="full_name" required value="${esc(u?.ism || '')}">
+                </div>
+                <div class="field">
+                    <label class="label">Email</label>
+                    <input class="input" name="email" type="email" required value="${esc(u?.email || '')}" ${isNew ? '' : 'disabled'}>
+                    ${isNew ? '' : '<div class="form-hint mt-1">Emailni o‘zgartirish uchun foydalanuvchini o‘chiring va yangidan yarating.</div>'}
+                </div>
+                <div class="field">
+                    <label class="label">Yangi parol ${isNew ? '' : '(ixtiyoriy)'}</label>
+                    <input class="input" name="password" type="text" placeholder="${isNew ? 'Kamida 6 belgi' : 'O‘zgartirmaslik uchun bo‘sh qoldiring'}">
+                </div>
+                <div class="grid grid-2" style="gap:12px">
+                    <div class="field">
+                        <label class="label">Rol</label>
+                        <select class="select" name="role" ${STATE.user.role === 'admin' ? '' : 'disabled'}>
+                            ${Object.keys(ROLE_LABELS).map(r =>
+                                `<option value="${r}" ${(u?.role || 'student') === r ? 'selected' : ''}>${roleLabel(r)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="label">Guruh</label>
+                        <select class="select" name="groupId">
+                            <option value="">Guruhsiz</option>
+                            ${groups.map(g => `<option value="${g.id}" ${u?.groupId === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-user').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash
+            </button>`,
+    }));
 };
 
-const formatVoiceTime = (s) => {
-    const mins = Math.floor(s / 60);
-    const secs = s % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
-window.sendVoiceMessage = (base64, duration) => {
-    let db = getDB();
-    const now = new Date();
-    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-    
-    let gid = STATE.user.groupId;
-    if (!gid && (STATE.user.role === 'ustoz' || STATE.user.role === 'admin')) {
-        const mg = db.groups.find(x => true);
-        if (mg) gid = mg.id;
-    }
-    
-    const newMsg = {
-        id: Date.now(),
-        groupId: gid,
-        userId: STATE.user.id,
-        userName: STATE.user.ism,
-        text: base64,
-        time: time,
-        type: 'voice',
-        duration: duration
-    };
-
-    db.chatMessages = db.chatMessages || [];
-    db.chatMessages.push(newMsg);
-    saveDB(db);
-    renderView('chat');
-};
-
-window.toggleEmojiPicker = () => {
-    const p = document.getElementById('emoji-picker');
-    p.classList.toggle('hidden');
-};
-
-window.addEmoji = (emoji) => {
-    const input = document.getElementById('chat-input');
-    input.value += emoji;
-    input.focus();
-    document.getElementById('emoji-picker').classList.add('hidden');
-};
-
-let CHAT_IMAGE_READY = null;
-
-window.previewChatImage = (input) => {
-    if (input.files && input.files[0]) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            CHAT_IMAGE_READY = e.target.result;
-            const preview = document.getElementById('image-preview');
-            preview.innerHTML = `<img src="${CHAT_IMAGE_READY}"><div class="close-preview" onclick="clearChatImage()">&times;</div>`;
-            preview.classList.remove('hidden');
-        };
-        reader.readAsDataURL(input.files[0]);
-    }
-};
-
-window.clearChatImage = () => {
-    CHAT_IMAGE_READY = null;
-    document.getElementById('image-preview').classList.add('hidden');
-    document.getElementById('chat-image-input').value = '';
-};
-
-window.sendChatMessage = (e) => {
+window.__svUser = async (e, id) => {
     e.preventDefault();
-    const input = document.getElementById('chat-input');
-    const text = input.value.trim();
-    if (!text && !CHAT_IMAGE_READY) return;
-
-    let db = getDB();
-    const now = new Date();
-    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-    
-    let gid = STATE.user.groupId;
-    if (!gid && STATE.user.role === 'ustoz') {
-        const mg = db.groups.find(x => x.ustozId === STATE.user.id);
-        if (mg) gid = mg.id;
-    }
-    
-    const newMsg = {
-        id: Date.now(),
-        groupId: gid,
-        userId: STATE.user.id,
-        userName: STATE.user.ism,
-        text: CHAT_IMAGE_READY || text,
-        time: time,
-        type: CHAT_IMAGE_READY ? 'image' : 'text'
+    const f = new FormData(e.target);
+    const payload = {
+        full_name: f.get('full_name'),
+        groupId: f.get('groupId') ? Number(f.get('groupId')) : null,
     };
+    if (f.get('password')) payload.password = f.get('password');
+    if (STATE.user.role === 'admin') payload.role = f.get('role');
 
-    db.chatMessages = db.chatMessages || [];
-    db.chatMessages.push(newMsg);
-    saveDB(db);
-    
-    input.value = '';
-    clearChatImage();
-    document.getElementById('emoji-picker').classList.add('hidden');
-    renderView('chat');
+    try {
+        if (id) {
+            await api_patch(`/users/${id}`, payload);
+        } else {
+            payload.name = payload.full_name;
+            payload.email = f.get('email');
+            payload.password = f.get('password');
+            await api_post('/users', payload);
+        }
+        showToast('Foydalanuvchi saqlandi', 'success');
+        cModal();
+        renderView('users');
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
 };
 
-window.deleteChatMessage = (id) => {
-    const db = getDB();
-    const msg = (db.chatMessages || []).find(m => m.id === id);
-    if (!msg) return;
-
-    if (msg.userId === STATE.user.id || STATE.user.role === 'admin' || STATE.user.role === 'ustoz') {
-        if (!confirm("Haqiqatan o‘chirmoqchimisiz?")) return;
-        db.chatMessages = db.chatMessages.filter(m => m.id !== id);
-        saveDB(db);
-        const el = document.getElementById('msg-' + id);
-        if (el) el.remove();
-        showToast("Xabar o'chirildi", "info");
-    } else {
-        showToast("Siz faqat o'zingizning xabarlaringizni o'chira olasiz!", "error");
-    }
-};
-
-window.zoomImage = (img) => {
-    const overlay = document.createElement('div');
-    overlay.className = 'fixed inset-0 bg-slate-900/90 z-[1000] flex items-center justify-center p-4 cursor-zoom-out animate-fade';
-    overlay.innerHTML = `<img src="${img.src}" class="max-w-[90%] max-h-[90%] rounded-2xl animate-zoom shadow-2xl object-contain">`;
-    overlay.onclick = () => overlay.remove();
-    document.body.appendChild(overlay);
-};
-
-// ======================== NOTIFICATIONS VIEW ========================
-const v_notifications = () => {
-    let db = getDB();
-    const r = STATE.user.role;
-    const notifs = (db.notifications || []).filter(n => r === 'admin' || (r === 'ustoz' && n.msg.includes(STATE.user.ism)) || (r === 'student' && n.userId === STATE.user.id)).reverse();
-    
-    // Mark as seen
-    db.notifications.forEach(n => {
-        if (r === 'admin' || (r === 'ustoz' && n.msg.includes(STATE.user.ism)) || (r === 'student' && n.userId === STATE.user.id)) n.seen = true;
-    });
-    saveDB(db);
+// ══════════════════════════════════════════════════════════════════════
+//  Views: groups
+// ══════════════════════════════════════════════════════════════════════
+async function v_groups() {
+    const [groups, users] = await Promise.all([getGroups(), api_get('/users').catch(() => [])]);
+    const canEdit = canManage() || STATE.user.role === 'ustoz';
+    window.__myGroup = groups.find(g => g.ustozId === STATE.user.id) || groups[0] || null;
 
     return `
-    <div class="max-w-3xl mx-auto space-y-8 animate-fade">
-        <h1 class="text-4xl font-black text-slate-800">Bildirishnomalar</h1>
-        <div class="space-y-4">
-            ${notifs.map(n => `
-                <div class="glass-card p-6 flex items-center gap-6 border-l-4 ${n.type === 'warning' ? 'border-amber-500 bg-amber-50/10' : 'border-indigo-500 bg-indigo-50/10'}">
-                    <div class="w-14 h-14 ${n.type === 'warning' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'} rounded-2xl flex items-center justify-center shrink-0">
-                        <i data-lucide="${n.type === 'warning' ? 'alert-triangle' : 'bell'}"></i>
-                    </div>
-                    <div class="flex-1">
-                        <p class="font-bold text-slate-800 text-lg">${n.msg}</p>
-                        <p class="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">${n.date}</p>
-                    </div>
-                </div>
-            `).join('')}
-            ${notifs.length === 0 ? '<div class="text-center py-20 text-slate-300 font-black">Hozircha hech qanday bildirishnoma yo\'q</div>' : ''}
-        </div>
-    </div>`;
-};
+        ${pageHead('Guruhlar', `${groups.length} ta guruh`, canManage()
+            ? `<button class="btn btn-primary" onclick="openGroupEditor()"><i data-lucide="plus"></i> Yangi guruh</button>` : '')}
 
-// ======================== LIBRARY SYSTEM (KUTUBXONA) ========================
-const v_library = () => {
-    const db = getDB();
-    const books = db.books || [];
-    const canManage = STATE.user.role === 'ustoz' || STATE.user.role === 'admin';
-
-    return `
-    <div class="max-w-6xl mx-auto animate-fade pb-20">
-        <div class="flex justify-between items-center mb-10">
-            <div>
-                <h1 class="text-4xl font-black text-slate-800 mb-1">📚 Kutubxona</h1>
-                <p class="text-slate-400 font-bold text-sm uppercase tracking-widest">O'quv materiallari va tavsiya etilgan kitoblar</p>
-            </div>
-            ${canManage ? `
-            <button onclick="oModal('add-book')" class="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-black shadow-xl shadow-indigo-600/30 btn-interactive flex items-center gap-3 hover:bg-indigo-700 transition-all">
-                <i data-lucide="plus" class="w-5 h-5"></i> Kitob Qo'shish
-            </button>` : ''}
-        </div>
-
-        ${books.length === 0 ? `
-        <div class="text-center py-32 bg-white rounded-[3rem] border border-slate-100 shadow-sm">
-            <div class="w-24 h-24 bg-indigo-50 rounded-[2rem] flex items-center justify-center mx-auto mb-6">
-                <i data-lucide="book-open" class="w-12 h-12 text-indigo-300"></i>
-            </div>
-            <h2 class="text-2xl font-black text-slate-400">Hali kitoblar yo'q</h2>
-            <p class="text-slate-300 font-bold mt-2">Ustoz kitob qo'shgandan so'ng bu yerda ko'rsatiladi</p>
-        </div>` : `
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            ${books.map(b => `
-            <div class="book-card bg-white rounded-[2.5rem] overflow-hidden shadow-premium border border-slate-100 cursor-pointer" onclick="oModal('view-book', ${b.id})">
-                <div class="book-img-container h-56 bg-gradient-to-br from-indigo-50 to-purple-50 relative overflow-hidden">
-                    ${b.image ? `<img src="${b.image}" class="w-full h-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
-                    <div class="hidden w-full h-full items-center justify-center">
-                        <i data-lucide="book" class="w-16 h-16 text-indigo-300"></i>
-                    </div>` : `<div class="w-full h-full flex items-center justify-center">
-                        <i data-lucide="book" class="w-16 h-16 text-indigo-300"></i>
-                    </div>`}
-                    <div class="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300 flex items-end p-4">
-                        <span class="text-white font-black text-sm flex items-center gap-1"><i data-lucide="eye" class="w-4 h-4"></i> Ko'rish</span>
-                    </div>
-                </div>
-                <div class="p-6">
-                    <h3 class="font-black text-slate-800 text-lg mb-2 line-clamp-2 leading-tight">${b.title}</h3>
-                    <p class="text-sm text-slate-400 font-medium line-clamp-2 leading-relaxed">${b.description || ''}</p>
-                    ${b.link && b.link !== '#' ? `
-                    <div class="mt-4 pt-4 border-t border-slate-50">
-                        <span class="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1">
-                            <i data-lucide="download" class="w-3 h-3"></i> Yuklab olish mavjud
-                        </span>
-                    </div>` : ''}
-                </div>
-                ${canManage ? `
-                <div class="px-6 pb-4 flex gap-2">
-                    <button onclick="event.stopPropagation(); deleteBook(${b.id})" class="flex-1 text-center py-2 bg-red-50 text-red-400 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-100 transition-all">
-                        O'chirish
-                    </button>
-                </div>` : ''}
-            </div>`).join('')}
-        </div>`}
-    </div>`;
-};
-
-window.deleteBook = (id) => {
-    if (!confirm("Bu kitobni o'chirmoqchimisiz?")) return;
-    let db = getDB();
-    db.books = (db.books || []).filter(b => b.id !== id);
-    saveDB(db);
-    renderView('library');
-    showToast("Kitob o'chirildi", "error");
-};
-
-// ======================== DUEL 1 VS 1 SYSTEM ========================
-// Questions now loaded from database
-
-let DUEL_STATE = {
-    active: false,
-    question: null,
-    answered: false,
-    playerScore: 0,
-    opponentScore: 0,
-    round: 0,
-    totalRounds: 5,
-    timer: null,
-    timeLeft: 15,
-    opponentName: 'Bot Opponent',
-    opponentAvatar: '🤖'
-};
-
-const v_duel = () => {
-    const db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    const today = new Date().toISOString().split('T')[0];
-    const duelTries = u.lastDuelDate === today ? (u.duelTries || 0) : 0;
-    const cooldownLeft = u.lastDuelEnd ? Math.max(0, 180 - Math.floor((Date.now() - u.lastDuelEnd) / 1000)) : 0;
-
-    return `
-    <div class="max-w-5xl mx-auto animate-fade pb-20">
-        <!-- Header -->
-        <div class="relative overflow-hidden bg-gradient-to-br from-slate-900 to-indigo-950 rounded-[3rem] p-10 mb-10 text-center shadow-2xl">
-            <div class="absolute -top-20 -left-20 w-60 h-60 bg-indigo-600/20 rounded-full blur-3xl"></div>
-            <div class="absolute -bottom-20 -right-20 w-80 h-80 bg-pink-600/20 rounded-full blur-3xl"></div>
-            <div class="relative z-10">
-                <div class="text-6xl mb-4 duel-start-anim">⚔️</div>
-                <h1 class="text-5xl font-black text-white mb-3 tracking-tight">DUEL <span class="text-pink-400">1 vs 1</span></h1>
-                <p class="text-indigo-200 font-bold text-lg max-w-lg mx-auto">Raqib bilan 5 savol bo'yicha bellashing. Eng tez va to'g'ri javob bering!</p>
-                <div class="flex justify-center gap-6 mt-8">
-                    <div class="bg-white/10 backdrop-blur-sm border border-white/20 px-6 py-3 rounded-2xl flex items-center gap-3">
-                        <div class="w-3 h-3 ${duelTries >= 5 ? 'bg-red-500' : 'bg-emerald-400'} rounded-full animate-pulse"></div>
-                        <span class="text-white font-black text-sm">Bugungi: ${duelTries}/5 duel</span>
-                    </div>
-                    <div class="bg-white/10 backdrop-blur-sm border border-white/20 px-6 py-3 rounded-2xl flex items-center gap-3">
-                        <i data-lucide="trophy" class="w-5 h-5 text-yellow-400"></i>
-                        <span class="text-white font-black text-sm">+20 XP g'alaba (Ball olish qiyin 🔥)</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Cooldown notice -->
-        ${cooldownLeft > 0 ? `
-        <div class="bg-amber-50 border border-amber-200 rounded-[2rem] p-6 mb-8 flex items-center gap-4">
-            <div class="w-14 h-14 bg-amber-100 rounded-2xl flex items-center justify-center">
-                <i data-lucide="clock" class="w-7 h-7 text-amber-600"></i>
-            </div>
-            <div>
-                <p class="font-black text-amber-800">Keyingi duelgacha kuting</p>
-                <p class="text-amber-600 font-bold text-sm">${cooldownLeft} soniya qoldi (anticheat cooldown)</p>
-            </div>
-        </div>` : ''}
-
-        <!-- Duel Arena -->
-        <div id="duel-arena" class="bg-slate-900 rounded-[3rem] overflow-hidden min-h-[500px] shadow-2xl border border-white/5 relative">
-
-            <!-- VS Screen (default) -->
-            <div id="duel-lobby" class="flex flex-col items-center justify-center h-full min-h-[500px] p-10 text-center">
-                
-                <!-- Player cards side-by-side -->
-                <div class="flex items-center gap-6 md:gap-12 mb-12 w-full justify-center">
-                    <!-- Player -->
-                    <div class="flex flex-col items-center">
-                        <div class="w-24 h-24 md:w-32 md:h-32 bg-indigo-600 rounded-[2rem] flex items-center justify-center font-black text-white text-4xl shadow-2xl shadow-indigo-600/50 border-4 border-indigo-400 mb-4">
-                            ${STATE.user.avatar ? `<img src="${STATE.user.avatar}" class="w-full h-full object-cover rounded-[2rem]">` : STATE.user.ism[0]}
-                        </div>
-                        <p class="text-white font-black text-xl">${STATE.user.ism}</p>
-                        <span class="text-indigo-400 text-sm font-black uppercase tracking-widest mt-1">SEN</span>
-                    </div>
-
-                    <!-- VS badge -->
-                    <div class="flex flex-col items-center gap-2">
-                        <div class="w-16 h-16 bg-gradient-to-br from-pink-600 to-orange-600 rounded-full flex items-center justify-center font-black text-white text-xl shadow-xl shadow-pink-600/40 border-4 border-pink-400 animate-pulse">VS</div>
-                    </div>
-
-                    <!-- Opponent (Bot) -->
-                    <div class="flex flex-col items-center">
-                        <div class="w-24 h-24 md:w-32 md:h-32 bg-pink-600 rounded-[2rem] flex items-center justify-center font-black text-white text-4xl shadow-2xl shadow-pink-600/50 border-4 border-pink-400 mb-4">
-                            🤖
-                        </div>
-                        <p class="text-white font-black text-xl">Bot Raqib</p>
-                        <span class="text-pink-400 text-sm font-black uppercase tracking-widest mt-1">RAQIB</span>
-                    </div>
-                </div>
-
-                <!-- Start button -->
-                ${duelTries >= 5 ? `
-                <div class="bg-red-500/20 border border-red-500/30 rounded-2xl px-10 py-5 text-red-400 font-black text-lg">
-                    Bugungi duel limiti tugadi (5/5)
-                </div>` : (cooldownLeft > 0 ? `
-                <div class="bg-amber-500/20 border border-amber-500/30 rounded-2xl px-10 py-5 text-amber-400 font-black text-lg">
-                    ⏳ ${cooldownLeft}s kuting...
-                </div>` : `
-                <button onclick="startDuel()" class="bg-gradient-to-r from-indigo-600 to-pink-600 text-white px-16 py-6 rounded-[2rem] font-black text-2xl shadow-2xl shadow-indigo-600/40 hover:scale-105 active:scale-95 transition-all border border-white/20 flex items-center gap-4 duel-start-anim">
-                    <i data-lucide="zap" class="w-8 h-8"></i> Duelni Boshlash!
-                </button>`)}
-
-                <p class="text-slate-500 font-bold mt-8 text-sm">5 savol · 15 soniya har bir savol uchun · G'alaba: +30 XP</p>
-            </div>
-
-            <!-- Game content (hidden initially) -->
-            <div id="duel-game-content" class="hidden"></div>
-        </div>
-
-        <!-- Rules -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-10">
-            <div class="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm text-center">
-                <div class="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">⏱</div>
-                <h3 class="font-black text-slate-800 mb-2">15 Soniya</h3>
-                <p class="text-sm text-slate-400 font-medium">Har bir savol uchun 15 soniya vaqt bor</p>
-            </div>
-            <div class="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm text-center">
-                <div class="w-14 h-14 bg-pink-50 text-pink-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">🎯</div>
-                <h3 class="font-black text-slate-800 mb-2">Tez javob = Ko'p ball</h3>
-                <p class="text-sm text-slate-400 font-medium">Tez javob bergan ko'proq ball to'playdi</p>
-            </div>
-            <div class="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm text-center">
-                <div class="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">🏆</div>
-                <h3 class="font-black text-slate-800 mb-2">G'alaba = +20 XP</h3>
-                <p class="text-sm text-slate-400 font-medium">Yutgan o'yinchi 20 XP oladi. Mag'lubiyat: 0 XP</p>
-            </div>
-        </div>
-    </div>`;
-};
-
-window.startDuel = () => {
-    const db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    const today = new Date().toISOString().split('T')[0];
-    const duelTries = u.lastDuelDate === today ? (u.duelTries || 0) : 0;
-    
-    if (duelTries >= 5) { showToast("Bugun limit tugadi!", "error"); return; }
-    const cooldownLeft = u.lastDuelEnd ? Math.max(0, 180 - Math.floor((Date.now() - u.lastDuelEnd) / 1000)) : 0;
-    if (cooldownLeft > 0) { showToast(`${cooldownLeft}s kuting!`, "error"); return; }
-
-    // Init new duel
-    DUEL_STATE = { active: true, answered: false, playerScore: 0, opponentScore: 0, round: 0, totalRounds: 5, timer: null, timeLeft: 15, opponentName: 'Bot Raqib', opponentAvatar: '🤖' };
-    
-    // Increment duel tries
-    u.duelTries = (u.duelTries || 0) + 1;
-    u.lastDuelDate = today;
-    saveDB(db);
-
-    const lobby = document.getElementById('duel-lobby');
-    const gameEl = document.getElementById('duel-game-content');
-    if (lobby) lobby.classList.add('hidden');
-    if (gameEl) { gameEl.classList.remove('hidden'); }
-
-    // Update db tries
-    if (u.lastDuelDate !== today) { u.lastDuelDate = today; u.duelTries = 1; }
-    else u.duelTries = (u.duelTries || 0) + 1;
-    saveDB(db);
-
-    duelNextRound();
-};
-
-function duelNextRound() {
-    if (DUEL_STATE.round >= DUEL_STATE.totalRounds) {
-        duelFinish();
-        return;
-    }
-    DUEL_STATE.round++;
-    DUEL_STATE.answered = false;
-    DUEL_STATE.timeLeft = 15;
-    
-    // Pick random question from db
-    const db = getDB();
-    const pool = db.questions.filter(q => q.type === 'duel');
-    if (pool.length === 0) {
-        showToast("Duel uchun savollar mavjud emas!", "error");
-        renderView('duel');
-        return;
-    }
-    DUEL_STATE.question = pool[Math.floor(Math.random() * pool.length)];
-    const q = DUEL_STATE.question;
-
-    const gameEl = document.getElementById('duel-game-content');
-    if (!gameEl) return;
-
-    gameEl.innerHTML = `
-    <div class="p-6 md:p-10">
-        <!-- Scoreboard -->
-        <div class="flex justify-between items-center mb-8 bg-white/5 rounded-[2rem] p-6 border border-white/10">
-            <!-- Player -->
-            <div class="flex items-center gap-4">
-                <div class="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center font-black text-white text-xl border-2 border-indigo-400">
-                    ${STATE.user.ism[0]}
-                </div>
-                <div>
-                    <p class="text-white font-black text-lg">${STATE.user.ism.split(' ')[0]}</p>
-                    <p class="text-indigo-400 font-black text-2xl" id="player-score-d">${DUEL_STATE.playerScore}</p>
-                </div>
-            </div>
-            <!-- Timer + Round -->
-            <div class="flex flex-col items-center gap-2">
-                <div class="text-slate-400 font-black text-xs uppercase tracking-widest">Savol ${DUEL_STATE.round}/${DUEL_STATE.totalRounds}</div>
-                <div id="duel-timer" class="w-20 h-20 rounded-full flex items-center justify-center font-black text-3xl text-white border-4 border-indigo-500 shadow-lg shadow-indigo-500/30">15</div>
-                <span class="text-xs font-black text-slate-500 uppercase tracking-wider">${q.type.replace('_', ' ')}</span>
-            </div>
-            <!-- Opponent -->
-            <div class="flex items-center gap-4">
-                <div>
-                    <p class="text-white font-black text-lg text-right">${DUEL_STATE.opponentName.split(' ')[0]}</p>
-                    <p class="text-pink-400 font-black text-2xl text-right" id="opp-score-d">${DUEL_STATE.opponentScore}</p>
-                </div>
-                <div class="w-14 h-14 bg-pink-600 rounded-2xl flex items-center justify-center font-black text-white text-xl border-2 border-pink-400">
-                    ${DUEL_STATE.opponentAvatar}
-                </div>
-            </div>
-        </div>
-
-        <!-- Question -->
-        <div class="bg-white/5 border border-white/10 rounded-[2.5rem] p-8 md:p-10 mb-8 text-center">
-            <p class="text-white font-black text-2xl md:text-3xl leading-relaxed">${q.questionText}</p>
-        </div>
-
-        <!-- Options -->
-        <div class="grid gap-4 md:grid-cols-2" id="duel-options">
-            ${['A','B','C','D'].map((code) => {
-                const opt = q[`option${code}`];
-                return `
-                <button onclick="duelAnswer('${code}')" id="duel-opt-${code}"
-                    class="p-6 rounded-[2rem] bg-white/5 border border-white/10 text-white font-black text-lg hover:bg-white/15 hover:border-indigo-400/50 active:scale-95 transition-all backdrop-blur-sm">
-                    <span class="text-indigo-500 mr-2">${code}:</span> ${opt}
-                </button>`;
-            }).join('')}
-        </div>
-    </div>`;
-    safeLucide(gameEl);
-
-    // Start timer
-    if (DUEL_STATE.timer) clearInterval(DUEL_STATE.timer);
-    DUEL_STATE.timer = setInterval(() => {
-        DUEL_STATE.timeLeft--;
-        const tel = document.getElementById('duel-timer');
-        if (tel) {
-            tel.innerText = DUEL_STATE.timeLeft;
-            if (DUEL_STATE.timeLeft <= 5) {
-                tel.style.borderColor = '#ef4444';
-                tel.style.color = '#ef4444';
-                tel.style.boxShadow = '0 0 20px rgba(239, 68, 68, 0.4)';
-            }
-        }
-        // Bot answers between 3-12 seconds randomly
-        if (!DUEL_STATE.answered && DUEL_STATE.botAnswerTime && DUEL_STATE.timeLeft <= DUEL_STATE.botAnswerTime) {
-            // Bot answers (sometimes wrong)
-            const botCorrect = Math.random() > 0.35;
-            if (botCorrect) {
-                const diffBonus = q.difficulty === 'hard' ? 15 : (q.difficulty === 'medium' ? 10 : 5);
-                DUEL_STATE.opponentScore += diffBonus + Math.ceil(DUEL_STATE.timeLeft * 0.5);
-            }
-            const oScore = document.getElementById('opp-score-d');
-            if (oScore) oScore.innerText = DUEL_STATE.opponentScore;
-        }
-        if (DUEL_STATE.timeLeft <= 0) {
-            clearInterval(DUEL_STATE.timer);
-            if (!DUEL_STATE.answered) duelAnswer(-1); // timeout
-        }
-    }, 1000);
-    // Set random bot answer time
-    DUEL_STATE.botAnswerTime = Math.floor(Math.random() * 9) + 3;
-}
-
-window.duelAnswer = (idx) => {
-    if (DUEL_STATE.answered) return;
-    DUEL_STATE.answered = true;
-    clearInterval(DUEL_STATE.timer);
-
-    const q = DUEL_STATE.question;
-    const correct = idx === q.correctAnswer;
-    const timeBonus = Math.ceil(DUEL_STATE.timeLeft * 0.5);
-
-    // Visual feedback
-    const codes = ['A', 'B', 'C', 'D'];
-    codes.forEach((code) => {
-        const btn = document.getElementById(`duel-opt-${code}`);
-        if (!btn) return;
-        btn.disabled = true;
-        if (code === q.correctAnswer) {
-            btn.style.background = 'rgba(16, 185, 129, 0.3)';
-            btn.style.borderColor = '#10b981';
-            btn.style.color = '#6ee7b7';
-        } else if (code === idx && idx !== q.correctAnswer) {
-            btn.style.background = 'rgba(239, 68, 68, 0.3)';
-            btn.style.borderColor = '#ef4444';
-            btn.style.color = '#fca5a5';
-        }
-    });
-
-    if (correct) {
-        const diffBonus = q.difficulty === 'hard' ? 15 : (q.difficulty === 'medium' ? 10 : 5);
-        DUEL_STATE.playerScore += diffBonus + timeBonus;
-        const pScore = document.getElementById('player-score-d');
-        if (pScore) pScore.innerText = DUEL_STATE.playerScore;
-    }
-
-    setTimeout(duelNextRound, 1500);
-};
-
-function duelFinish() {
-    const won = DUEL_STATE.playerScore > DUEL_STATE.opponentScore;
-    const draw = DUEL_STATE.playerScore === DUEL_STATE.opponentScore;
-    const gameEl = document.getElementById('duel-game-content');
-    if (!gameEl) return;
-
-    // Cooldown
-    let db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    if (u) { u.lastDuelEnd = Date.now(); saveDB(db); }
-
-    if (won) {
-        addPoints(20, "Duel g'alabasi", "duels");
-        let dbW = getDB();
-        const uW = dbW.users.find(x => x.id === STATE.user.id);
-        if (uW) {
-            uW.duelWins = (uW.duelWins || 0) + 1;
-            saveDB(dbW);
-            STATE.user.duelWins = uW.duelWins;
-            localStorage.setItem('lms_user', JSON.stringify(STATE.user));
-        }
-    }
-    else if (!draw) addPoints(0, "Duel qatnashish", "duels");
-
-    const emoji = won ? '🏆' : (draw ? '🤝' : '💀');
-    const title = won ? "G'ALABA!" : (draw ? "DURRANG!" : "MAG'LUBIYAT!");
-    const color = won ? 'text-yellow-400' : (draw ? 'text-blue-400' : 'text-red-400');
-    const xp = won ? '+20 XP' : '+0 XP (Hard Mode)';
-
-    gameEl.innerHTML = `
-    <div class="flex flex-col items-center justify-center min-h-[400px] p-10 text-center">
-        <div class="text-8xl mb-6 animate-achievement-pop">${emoji}</div>
-        <h2 class="text-5xl font-black ${color} mb-4">${title}</h2>
-        <div class="flex gap-8 mb-8 text-center">
-            <div>
-                <p class="text-slate-400 font-black text-xs uppercase tracking-widest mb-1">Sening balling</p>
-                <p class="text-4xl font-black text-indigo-400">${DUEL_STATE.playerScore}</p>
-            </div>
-            <div class="w-px bg-white/10"></div>
-            <div>
-                <p class="text-slate-400 font-black text-xs uppercase tracking-widest mb-1">Raqib balli</p>
-                <p class="text-4xl font-black text-pink-400">${DUEL_STATE.opponentScore}</p>
-            </div>
-        </div>
-        <p class="text-lg font-black ${color} mb-8">${xp} to'plandi!</p>
-        <button onclick="renderView('duel')" class="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-14 py-5 rounded-[2rem] font-black text-xl shadow-2xl hover:scale-105 active:scale-95 transition-all">
-            Qaytish
-        </button>
-    </div>`;
-    DUEL_STATE.active = false;
-}
-
-// ======================== MINI GAME SYSTEM ========================
-// ======================== MINI GAME SYSTEM (UPGRADED: CODE BREAKER CHALLENGE) ========================
-const v_game = () => {
-    const db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    const today = new Date().toISOString().split('T')[0];
-    const tries = u.lastGameDate === today ? (u.gameTries || 0) : 0;
-
-    return `
-    <div class="max-w-5xl mx-auto space-y-10 animate-fade pb-20">
-        <header class="text-center bg-white p-12 rounded-[3.5rem] shadow-premium relative overflow-hidden group">
-             <div class="absolute -top-10 -left-10 w-40 h-40 bg-indigo-50 rounded-full blur-3xl group-hover:bg-indigo-100 transition-colors"></div>
-             <div class="absolute -bottom-10 -right-10 w-60 h-60 bg-purple-50 rounded-full blur-3xl"></div>
-             <div class="relative z-10 flex flex-col items-center">
-                 <div class="w-24 h-24 bg-gradient-to-br from-indigo-600 to-purple-600 text-white rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl shadow-indigo-200 animate-bounce-subtle">
-                     <i data-lucide="zap" class="w-12 h-12"></i>
-                 </div>
-                 <h1 class="text-5xl font-black text-slate-800 mb-3 tracking-tight">Code Breaker <span class="text-indigo-600">Challenge</span></h1>
-                 <p class="text-slate-500 font-bold text-lg mb-8 max-w-xl">Mantiq va tezkorlik o'yini. Har kuni 3 ta imkoniyat! streak yig'ing va ko'proq XP oling.</p>
-                 
-                 <div class="flex gap-4 mb-2">
-                    <div class="px-6 py-3 bg-slate-50 border border-slate-100 rounded-2xl flex items-center gap-3">
-                        <div class="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
-                        <span class="text-sm font-black text-slate-700" id="game-daily-tries">Imkoniyat: ${tries}/3</span>
-                    </div>
-                    <div class="px-6 py-3 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-3">
-                        <i data-lucide="flame" class="w-5 h-5 text-orange-500"></i>
-                        <span class="text-sm font-black text-indigo-700" id="game-streak">Streak: ${CURRENT_STREAK}</span>
-                    </div>
-                 </div>
-             </div>
-        </header>
-        
-        <div id="game-arena" class="min-h-[550px] rounded-[4rem] relative flex flex-col items-center justify-center overflow-hidden shadow-2xl transition-all duration-500">
-             <div class="absolute inset-0 bg-slate-900 overflow-hidden">
-                <div class="absolute top-0 left-0 w-full h-full opacity-10 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
-                <div class="absolute -top-40 -left-40 w-80 h-80 bg-indigo-600/20 rounded-full blur-[100px]"></div>
-                <div class="absolute -bottom-40 -right-40 w-80 h-80 bg-purple-600/20 rounded-full blur-[100px]"></div>
-                <div class="grid-overlay pointer-events-none"></div>
-             </div>
-
-             <div id="game-content" class="relative z-10 w-full flex flex-col items-center px-6 md:px-20 text-center">
-                 <div class="animate-zoom flex flex-col items-center">
-                    <div class="text-8xl mb-10 drop-shadow-[0_0_30px_rgba(79,70,229,0.5)]">🧩</div>
-                    <h2 class="text-4xl font-black text-white mb-10 tracking-wide">Tayyormisiz?</h2>
-                    <div class="flex flex-wrap justify-center gap-4">
-                        <button onclick="startMiniGame('easy')" class="game-btn-neon easy btn-interactive px-8 py-4 rounded-3xl font-black text-base">Oson</button>
-                        <button onclick="startMiniGame('medium')" class="game-btn-neon medium btn-interactive px-8 py-4 rounded-3xl font-black text-base">O'rta</button>
-                        <button onclick="startMiniGame('hard')" class="game-btn-neon hard btn-interactive px-8 py-4 rounded-3xl font-black text-base">Qiyin</button>
-                        <button onclick="startMiniGame('juda_qiyin')" class="game-btn-neon judaqiyin btn-interactive px-8 py-4 bg-red-600 shadow-red-500/50 rounded-3xl font-black text-base text-white">Juda Qiyin</button>
-             </div>
-        </div>
-    </div>`;
-};
-
-let CURRENT_STREAK = 0;
-
-window.startMiniGame = (diff) => {
-    const db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    const today = new Date().toISOString().split('T')[0];
-    const tries = u.lastGameDate === today ? (u.gameTries || 0) : 0;
-    
-    if (tries >= 3) {
-        showToast("Bugungi limit tugadi! (3/3)", "error");
-        return;
-    }
-
-    // Generate dynamic Math question based on diff
-    let num1, num2, num3_val, correctAnswer, ops, op;
-    if (diff === 'easy') {
-        num1 = Math.floor(Math.random() * 20) + 1;
-        num2 = Math.floor(Math.random() * 20) + 1;
-        ops = ['+', '-'];
-        op = ops[Math.floor(Math.random() * ops.length)];
-        if (op === '-' && num1 < num2) { let temp=num1; num1=num2; num2=temp; }
-        correctAnswer = op === '+' ? num1 + num2 : num1 - num2;
-    } else if (diff === 'medium') {
-        num1 = Math.floor(Math.random() * 50) + 10;
-        num2 = Math.floor(Math.random() * 30) + 5;
-        ops = ['+', '-', '*'];
-        op = ops[Math.floor(Math.random() * ops.length)];
-        if (op === '-' && num1 < num2) { let temp=num1; num1=num2; num2=temp; }
-        if (op === '*') { num1 = Math.floor(Math.random() * 12) + 2; num2 = Math.floor(Math.random() * 12) + 2; }
-        correctAnswer = op === '+' ? num1 + num2 : (op === '-' ? num1 - num2 : num1 * num2);
-    } else if (diff === 'hard') {
-        num1 = Math.floor(Math.random() * 100) + 20;
-        num2 = Math.floor(Math.random() * 50) + 10;
-        ops = ['*', '/', '+', '-'];
-        op = ops[Math.floor(Math.random() * ops.length)];
-        if (op === '*') { num1 = Math.floor(Math.random() * 20) + 5; num2 = Math.floor(Math.random() * 20) + 5; }
-        if (op === '/') { 
-            num2 = Math.floor(Math.random() * 15) + 2; 
-            correctAnswer = Math.floor(Math.random() * 20) + 2; 
-            num1 = num2 * correctAnswer; 
-        }
-        correctAnswer = op === '+' ? num1 + num2 : (op === '*' ? num1 * num2 : (op === '/' ? num1 / num2 : num1 - num2));
-    } else if (diff === 'juda_qiyin') {
-        num1 = Math.floor(Math.random() * 200) + 50;
-        num2 = Math.floor(Math.random() * 100) + 20;
-        num3_val = Math.floor(Math.random() * 20) + 2;
-        op = '*+';
-        correctAnswer = num1 * num3_val + num2;
-    }
-    
-    let questionText = op === '*+' ? `${num1} * ${num3_val} + ${num2} = ?` : `${num1} ${op} ${num2} = ?`;
-    
-    // Generate answers list
-    let answers = [correctAnswer.toString()];
-    while(answers.length < 4) {
-        let fake = correctAnswer + (Math.floor(Math.random() * 20) - 10);
-        if (fake !== correctAnswer && !answers.includes(fake.toString())) {
-            answers.push(fake.toString());
-        }
-    }
-    answers.sort(() => Math.random() - 0.5);
-    let correctCode = ['A', 'B', 'C', 'D'][answers.indexOf(correctAnswer.toString())];
-    
-    const arena = document.getElementById('game-arena');
-    const content = document.getElementById('game-content');
-    
-    content.innerHTML = `<div class="text-6xl font-black text-white animate-pulse">3...</div>`;
-    
-    setTimeout(() => {
-        let timeLimit = diff === 'juda_qiyin' ? 10 : (diff === 'hard' ? 12 : (diff === 'medium' ? 15 : 20));
-        let startTime = Date.now();
-        
-        content.innerHTML = `
-            <div class="w-full max-w-2xl animate-zoom">
-                <div class="flex justify-between items-center mb-10 w-full bg-slate-800/50 p-6 rounded-[2rem] border border-white/10 backdrop-blur-xl shadow-2xl">
-                    <div class="flex items-center gap-4">
-                        <div class="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg ring-4 ring-indigo-500/20">${diff[0].toUpperCase()}</div>
-                        <div>
-                            <p class="text-[10px] font-black uppercase text-indigo-400 tracking-[3px]">Difficulty</p>
-                            <h4 class="text-white font-black uppercase">${diff.replace('_', ' ')}</h4>
-                        </div>
-                    </div>
-                    <div class="flex flex-col items-end">
-                        <p class="text-[10px] font-black uppercase text-pink-500 tracking-[3px] mb-1">Time Remaining</p>
-                        <div id="game-timer" class="text-4xl font-black font-mono text-pink-500 drop-shadow-[0_0_15px_rgba(236,72,153,0.5)]">${timeLimit}s</div>
-                    </div>
-                </div>
-
-                <div class="bg-slate-800/80 p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-white/5 border-t-white/10 mb-8 md:mb-10 shadow-2xl relative overflow-hidden group">
-                    <div class="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-500 to-purple-500"></div>
-                    <code class="text-3xl sm:text-4xl md:text-5xl font-black text-indigo-100 flex items-center justify-center gap-2 md:gap-4 py-3 md:py-4 tracking-tighter">
-                        ${questionText}
-                    </code>
-                </div>
-
-                <div class="grid gap-5 md:grid-cols-2">
-                    ${['A','B','C','D'].map((code, i) => {
-                        return `
-                        <button onclick="checkGameAnswer('${code}', '${correctCode}', '${diff}', ${startTime}, ${timeLimit})" 
-                            class="game-answer-btn p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] bg-slate-800/40 border border-white/10 text-white font-black text-2xl md:text-3xl hover:bg-slate-700/60 hover:scale-[1.02] hover:border-indigo-500/50 transition-all shadow-xl backdrop-blur-md active:scale-95 group flex justify-between items-center">
-                            <span>${answers[i]}</span>
-                            <div class="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center group-hover:bg-indigo-600 group-hover:border-indigo-400 transition-all">
-                                <i data-lucide="arrow-right" class="w-5 h-5 opacity-50 group-hover:opacity-100"></i>
+        ${groups.length === 0
+            ? emptyState('users-round', 'Guruhlar yo‘q', 'Administrator bilan bog‘laning.')
+            : `<div class="grid grid-auto">
+                ${groups.map(g => {
+                    const teacher = users.find(u => u.id === g.ustozId);
+                    return `
+                    <article class="card card-pad card-hover">
+                        <div class="d-flex items-start justify-between gap-3 mb-4">
+                            <div class="card-icon"><i data-lucide="users-round"></i></div>
+                            <div class="d-flex gap-1">
+                                <button class="btn-icon sm" onclick="window.__openGroupEditorById(${g.id})" aria-label="Tahrirlash"><i data-lucide="pencil"></i></button>
+                                ${canManage() ? `<button class="btn-icon sm" onclick="window.__delGroup(${g.id})" aria-label="O’chirish" style="color:var(--red-500)"><i data-lucide="trash-2"></i></button>` : ''}
                             </div>
-                        </button>`;
+                        </div>
+                        <h3 class="tile-title" style="font-size:1.0625rem">${esc(g.name)}</h3>
+                        <div class="stack-sm mt-3">
+                            <div class="d-flex items-center gap-2 t-sm">
+                                <i data-lucide="user-check" style="width:16px;height:16px;color:var(--gray-400)"></i>
+                                <span class="c-muted">O‘qituvchi:</span>
+                                <span class="fw-7">${esc(teacher?.ism || 'biriktirilmagan')}</span>
+                            </div>
+                            <div class="d-flex items-center gap-2 t-sm">
+                                <i data-lucide="users" style="width:16px;height:16px;color:var(--gray-400)"></i>
+                                <span class="c-muted">Talabalar:</span>
+                                <span class="fw-7">${(g.studentIds || []).length}</span>
+                            </div>
+                            <div class="d-flex items-center gap-2 t-sm">
+                                <i data-lucide="calendar-days" style="width:16px;height:16px;color:var(--gray-400)"></i>
+                                <span class="c-muted">Mashg‘ulot:</span>
+                                <span class="fw-7">${(g.schedule || []).length} ta</span>
+                            </div>
+                        </div>
+                        <div class="d-flex gap-2 mt-4">
+                            <button class="btn btn-soft btn-sm grow" onclick="window.__openScheduleEditorById(${g.id})">
+                                <i data-lucide="calendar-days"></i> Jadval
+                            </button>
+                            <button class="btn btn-soft btn-sm grow" onclick="go('attendance')">
+                                <i data-lucide="user-check"></i> Davomat
+                            </button>
+                        </div>
+                    </article>`;
+                }).join('')}
+            </div>`}`;
+}
+
+window.__openGroupEditorById = async (id) => {
+    const groups = await getGroups();
+    openGroupEditor(groups.find(g => g.id === id));
+};
+window.__openScheduleEditorById = async (id) => {
+    const groups = await getGroups();
+    openScheduleEditor(groups.find(g => g.id === id));
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: attendance
+// ══════════════════════════════════════════════════════════════════════
+async function v_attendance() {
+    const groups = await getGroups();
+    if (groups.length === 0) return pageHead('Davomat') + emptyState('users-round', 'Guruhlar yo‘q');
+
+    const gid = STATE.activeGroupId || groups[0].id;
+    STATE.activeGroupId = gid;
+    const g = groups.find(x => x.id === gid);
+
+    return `
+        ${pageHead('Davomat', 'Har bir talaba uchun kelgan / kelmagan belgilang', `
+            <input type="date" class="input" id="att-date" value="${new Date().toISOString().slice(0, 10)}"
+                   style="width:auto" onchange="window.__loadAttendance()">`)}
+
+        <div class="d-flex gap-2 mb-5 flex-wrap" id="att-groups">
+            ${groups.map(x => `
+                <button class="btn ${x.id === gid ? 'btn-primary' : 'btn-outline'} btn-sm"
+                        onclick="STATE.activeGroupId=${x.id};renderView('attendance')">${esc(x.name)}</button>`).join('')}
+        </div>
+
+        <div id="att-stats" class="grid grid-4 mb-6"></div>
+        <div id="att-list"></div>`;
+}
+
+window.__loadAttendance = async () => {
+    const gid = STATE.activeGroupId;
+    const date = document.getElementById('att-date')?.value || new Date().toISOString().slice(0, 10);
+    mount('att-list', async () => {
+        const [users, recs] = await Promise.all([api_get('/users'), getAttendance()]);
+        const g = (await getGroups()).find(x => x.id === gid);
+        const students = users.filter(u => u.role === 'student' && (g?.studentIds || []).includes(u.id));
+        const rec = recs.find(r => r.groupId === gid && r.date === date);
+        const records = rec?.records || {};
+
+        const present = Object.values(records).filter(v => v === 'present').length;
+        const absent = Object.values(records).filter(v => v === 'absent').length;
+
+        const statsBox = document.getElementById('att-stats');
+        if (statsBox) {
+            statsBox.innerHTML = [
+                statTile({ label: 'Jami', value: students.length, icon: 'users' }),
+                statTile({ label: 'Kelgan', value: present, icon: 'user-check', tone: 'green' }),
+                statTile({ label: 'Kelmagan', value: absent, icon: 'user-x', tone: 'red' }),
+                statTile({ label: 'Belgilanmagan', value: students.length - present - absent, icon: 'circle-dashed', tone: 'amber' }),
+            ].join('');
+            safeLucide(statsBox);
+        }
+
+        if (students.length === 0) return emptyState('users', 'Guruhda talaba yo‘q');
+
+        return `
+            <section class="card">
+                <div class="list list-flush">
+                    ${students.map(s => {
+                        const st = records[String(s.id)];
+                        return `
+                        <div class="list-row">
+                            ${avatarHtml(s, 'avatar-sm')}
+                            <div class="grow" style="min-width:0">
+                                <div class="list-title truncate">${esc(s.ism)}</div>
+                                <div class="list-sub truncate">${esc(s.email)}</div>
+                            </div>
+                            <div class="seg ${st === 'present' ? 'present' : st === 'absent' ? 'absent' : ''}"
+                                 onclick="window.__markAtt(${gid},${s.id},this)">
+                                <div class="thumb"></div>
+                                <div class="lbl-yes">Keldi</div>
+                                <div class="lbl-no">Yo‘q</div>
+                            </div>
+                        </div>`;
                     }).join('')}
                 </div>
-            </div>
-        `;
-        safeLucide(content);
-
-        let t = timeLimit;
-        window.currentGameTimer = setInterval(() => {
-            t--;
-            const tel = document.getElementById('game-timer');
-            if (tel) {
-                tel.innerText = t + 's';
-                if (t <= 5) tel.classList.add('animate-pulse');
-            }
-            if (t <= 0) {
-                clearInterval(window.currentGameTimer);
-                handleGameFail("Vaqt tugadi!", diff);
-            }
-        }, 1000);
-    }, 1000);
-};
-
-window.checkGameAnswer = (ans, correct, diff, start, limit) => {
-    clearInterval(window.currentGameTimer);
-    const duration = (Date.now() - start) / 1000;
-    const speedBonus = Math.max(0, Math.ceil((limit - duration) * 2));
-    
-    if (ans === correct) {
-        handleGameWin(diff, speedBonus);
-    } else {
-        handleGameFail("Noto'g'ri javob!", diff);
-    }
-    
-    let db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    const today = new Date().toISOString().split('T')[0];
-    if (u.lastGameDate !== today) {
-        u.lastGameDate = today;
-        u.gameTries = 1;
-    } else {
-        u.gameTries = (u.gameTries || 0) + 1;
-    }
-    saveDB(db);
-};
-
-window.handleGameWin = (diff, bonus) => {
-    CURRENT_STREAK++;
-    const diffXP = diff === 'juda_qiyin' ? 30 : (diff === 'hard' ? 10 : (diff === 'medium' ? 5 : 2));
-    const totalXP = diffXP + Math.min(bonus, 3) + (CURRENT_STREAK > 1 ? Math.min(CURRENT_STREAK, 2) : 0);
-    addPoints(Math.round(totalXP), `Code Breaker streak: ${CURRENT_STREAK}`, "miniGame");
-    const arena = document.getElementById('game-arena');
-    arena.classList.add('win-glow');
-    const content = document.getElementById('game-content');
-    content.innerHTML = `
-        <div class="text-center animate-achievement-pop">
-            <div class="relative inline-block mb-10">
-                <div class="absolute inset-0 bg-yellow-400 blur-3xl opacity-30 animate-pulse rounded-full"></div>
-                <div class="text-9xl relative">🏆</div>
-            </div>
-            <h2 class="text-6xl font-black text-white mb-4 tracking-tighter">TO'G'RI!</h2>
-            <div class="flex flex-col items-center gap-3 mb-10">
-                <p class="text-indigo-400 font-black text-2xl">+${totalXP} XP To'plandi</p>
-                <div class="flex gap-4">
-                    ${bonus > 0 ? `<span class="px-4 py-2 bg-pink-500/20 text-pink-400 border border-pink-500/30 rounded-full text-xs font-black uppercase tracking-widest">+${bonus} Speed Bonus</span>` : ''}
-                    ${CURRENT_STREAK > 1 ? `<span class="px-4 py-2 bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-full text-xs font-black uppercase tracking-widest">Streak x${CURRENT_STREAK}</span>` : ''}
+                <div class="card-pad border-t">
+                    <button class="btn btn-success btn-block" onclick="window.__markAllAtt(${gid})">
+                        <i data-lucide="check-check"></i> Hammasini kelgan deb belgilash
+                    </button>
                 </div>
-            </div>
-            <button onclick="renderView('game')" class="bg-indigo-600 px-14 py-6 rounded-[2.5rem] font-black text-xl text-white shadow-2xl shadow-indigo-500/50 hover:bg-indigo-700 hover:scale-110 active:scale-95 transition-all">Davom etish</button>
-        </div>
-    `;
-    triggerConfetti();
+            </section>`;
+    });
 };
 
-window.handleGameFail = (reason, diff = 'medium') => {
-    CURRENT_STREAK = 0;
-    const penaltyXP = diff === 'juda_qiyin' ? 15 : (diff === 'hard' ? 5 : (diff === 'medium' ? 2 : 1));
-    let db = getDB();
-    const u = db.users.find(x => x.id === STATE.user.id);
-    if(u) {
-        u.points = Math.max(0, (u.points || 0) - penaltyXP);
-        saveDB(db);
-        STATE.user = u;
-        localStorage.setItem('lms_user', JSON.stringify(u));
-    }
-    const arena = document.getElementById('game-arena');
-    arena.classList.add('fail-shake');
-    setTimeout(() => arena.classList.remove('fail-shake'), 500);
-    const content = document.getElementById('game-content');
-    content.innerHTML = `
-        <div class="text-center animate-zoom">
-            <div class="text-9xl mb-8 drop-shadow-2xl">💀</div>
-            <h2 class="text-6xl font-black text-white mb-2 tracking-tighter">XATO!</h2>
-            <p class="text-slate-400 font-black text-xl mb-10 uppercase tracking-[5px]">${reason}</p>
-            <div class="flex gap-6">
-                 <button onclick="renderView('game')" class="bg-slate-800 border border-white/10 px-10 py-5 rounded-[2rem] font-black text-white hover:bg-slate-700 transition-all">Qaytadan</button>
-            </div>
-        </div>
-    `;
-};
-
-window.triggerConfetti = () => {
-    const arena = document.getElementById('game-arena');
-    for(let i=0; i<30; i++) {
-        const p = document.createElement('div');
-        p.className = 'absolute pointer-events-none';
-        p.style.left = '50%'; p.style.top = '50%';
-        const colors = ['#4f46e5', '#ec4899', '#fbbf24', '#10b981'];
-        p.style.background = colors[Math.floor(Math.random() * colors.length)];
-        p.style.width = Math.random() * 10 + 5 + 'px';
-        p.style.height = p.style.width;
-        p.style.borderRadius = '50%';
-        arena.appendChild(p);
-        const angle = Math.random() * Math.PI * 2;
-        const velocity = Math.random() * 300 + 100;
-        const vx = Math.cos(angle) * velocity;
-        const vy = Math.sin(angle) * velocity;
-        let startTime = Date.now();
-        const anim = () => {
-            const elapsed = (Date.now() - startTime) / 1000;
-            if (elapsed > 1.5) { p.remove(); return; }
-            p.style.transform = `translate(${vx * elapsed}px, ${vy * elapsed + (500 * elapsed * elapsed)}px)`;
-            p.style.opacity = 1 - elapsed;
-            requestAnimationFrame(anim);
-        };
-        requestAnimationFrame(anim);
+window.__markAtt = async (gid, sid, el) => {
+    const date = document.getElementById('att-date')?.value || new Date().toISOString().slice(0, 10);
+    const isPresent = el.classList.contains('present');
+    const next = isPresent ? 'absent' : 'present';
+    el.classList.remove('present', 'absent');
+    if (next === 'present') el.classList.add('present');
+    try {
+        await api_post('/attendance', { groupId: gid, studentId: sid, status: next, date });
+    } catch (e) {
+        showToast(e.message, 'error');
+        el.classList.remove('present', 'absent');
     }
 };
 
-// Mobile Swipe Navigation
-let touchstartX_nav = 0, touchendX_nav = 0;
-document.addEventListener('touchstart', e => { touchstartX_nav = e.changedTouches[0].screenX; }, {passive: true});
-document.addEventListener('touchend', e => { 
-    touchendX_nav = e.changedTouches[0].screenX;
-    if (window.innerWidth < 1024) {
-        const s = document.getElementById('sidebar-container');
-        if (touchendX_nav > touchstartX_nav + 80) s.classList.remove('-translate-x-full');
-        else if (touchendX_nav < touchstartX_nav - 80) s.classList.add('-translate-x-full');
-    }
-}, {passive: true});
-
-// ======================== SCHEDULE BUILDER (USTOZ) ========================
-const v_schedule = () => {
-    const db = getDB();
-    const r = STATE.user.role;
-    const myGroups = (db.groups||[]).filter(g => g.ustozId === STATE.user.id || r === 'admin' || (r === 'student' && g.studentIds && g.studentIds.includes(STATE.user.id)));
-    const days = CURRENT_LANG==='ru'
-        ? ['Dushanba','Seshanba','Chorshanba','Payshanba','Juma','Shanba']
-        : ['Dushanba','Seshanba','Chorshanba','Payshanba','Juma','Shanba'];
-
-    const activeGroupId = STATE._scheduleGroupId || (myGroups[0] && myGroups[0].id);
-    const group = (db.groups||[]).find(g => g.id === activeGroupId);
-    const schedule = group ? (group.schedule || []) : [];
-
-    return `<div class="max-w-5xl mx-auto animate-fade space-y-8">
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-            <h1 class="text-3xl font-black text-slate-800">${t('schedule')}</h1>
-            <p class="text-slate-400 font-bold text-xs uppercase tracking-widest mt-1">${'Dars vaqtlarini boshqarish'}</p>
-        </div>
-        <select onchange="STATE._scheduleGroupId=parseInt(this.value); renderView('schedule')" 
-            class="bg-white border border-slate-200 rounded-2xl px-4 py-3 font-bold outline-none shadow-sm">
-            ${myGroups.map(g=>`<option value="${g.id}" ${g.id===activeGroupId?'selected':''}>${g.name}</option>`).join('')}
-        </select>
-    </div>
-
-    ${!group ? `<div class="text-center py-20 glass-card rounded-[3rem]"><p class="text-slate-400 font-bold">${'Guruhlar topilmadi'}</p></div>` : `
-    <div class="glass-card p-8 rounded-[2.5rem] bg-white shadow-premium">
-        <h2 class="text-xl font-black mb-6 flex items-center gap-2"><i data-lucide="calendar" class="text-indigo-600 w-6 h-6"></i> ${group.name} — ${'Jadval'}</h2>
-        <div class="space-y-4">
-        ${days.map((day, di) => {
-            const daySlots = schedule.filter(s => s.dayIndex === di);
-            return `<div class="p-5 bg-slate-50 border border-slate-100 rounded-[1.5rem]">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="font-black text-slate-700">${day}</span>
-                    ${r !== 'student' ? `<button onclick="addScheduleSlot(${activeGroupId}, ${di})" 
-                        class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-black text-xs px-3 py-1.5 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition">
-                        <i data-lucide="plus" class="w-3 h-3"></i> ${"Qo'shish"}
-                    </button>` : ''}
-                </div>
-                <div class="space-y-2">
-                ${daySlots.length === 0 ? `<p class="text-slate-300 font-bold text-sm italic">${"Dars yo'q"}</p>` : 
-                daySlots.map(sl => `
-                    <div class="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100 group">
-                        <div class="w-2 h-2 bg-indigo-500 rounded-full"></div>
-                        <span class="font-black text-indigo-700 text-sm">${sl.time}</span>
-                        <span class="flex-1 font-bold text-slate-600 text-sm">${sl.subject||''}</span>
-                        ${r !== 'student' ? `<button onclick="removeScheduleSlot(${activeGroupId}, '${sl.id}')" 
-                            class="opacity-0 group-hover:opacity-100 transition text-red-400 hover:text-red-600 p-1">
-                            <i data-lucide="trash-2" class="w-4 h-4"></i>
-                        </button>` : ''}
-                    </div>`).join('')}
-                </div>
-            </div>`;
-        }).join('')}
-        </div>
-    </div>`}
-    </div>`;
+window.__markAllAtt = async (gid) => {
+    const date = document.getElementById('att-date')?.value || new Date().toISOString().slice(0, 10);
+    const [users, g] = await Promise.all([api_get('/users'), getGroups()]);
+    const students = users.filter(u => u.role === 'student' && (g.find(x => x.id === gid)?.studentIds || []).includes(u.id));
+    try {
+        await Promise.all(students.map(s => api_post('/attendance', { groupId: gid, studentId: s.id, status: 'present', date })));
+        showToast(`${students.length} talaba belgilandi`, 'success');
+        window.__loadAttendance();
+    } catch (e) { showToast(e.message, 'error'); }
 };
 
-window.addScheduleSlot = (groupId, dayIndex) => {
-    const time = prompt("Vaqt (masalan: 09:00):");
-    if (!time) return;
-    const subject = prompt("Dars nomi:");
-    if (!subject) return;
-    let db = getDB();
-    const group = db.groups.find(g => g.id === groupId);
-    if (!group) return;
-    group.schedule = group.schedule || [];
-    group.schedule.push({ id: Date.now(), dayIndex, time, subject });
-    saveDB(db);
-    renderView('schedule');
-    showToast('Qo\'shildi!');
+window.geoCheckin = async (btn) => {
+    if (!navigator.geolocation) { showToast('Brauzeringiz geolokatsiyani qo‘llab-quvvatlamaydi', 'error'); return; }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:16px;height:16px"></span> Joylashuv...';
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        try {
+            const res = await api_post('/attendance/checkin', { lat: pos.coords.latitude, lng: pos.coords.longitude });
+            showToast(res.message, res.inside ? 'success' : 'error');
+            renderView('attendance');
+        } catch (e) { showToast(e.message, 'error'); btn.disabled = false; btn.innerHTML = '<i data-lucide="map-pin"></i> Lokatsiya orqali'; safeLucide(btn); }
+    }, (err) => {
+        showToast('Joylashuvni olishda xatolik: ' + err.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="map-pin"></i> Lokatsiya orqali';
+        safeLucide(btn);
+    }, { enableHighAccuracy: true, timeout: 10000 });
 };
 
-window.removeScheduleSlot = (groupId, slotId) => {
-    let db = getDB();
-    const group = db.groups.find(g => g.id === groupId);
-    if (!group) return;
-    group.schedule = (group.schedule||[]).filter(s => String(s.id) !== String(slotId));
-    saveDB(db);
-    renderView('schedule');
-};
-
-
-// ======================== STAFF CHAT SYSTEM ========================
-const v_staff_chat = () => {
-    const db = getDB();
-    const r = STATE.user.role;
-    
-    if (!['admin', 'tech_admin', 'director', 'ustoz'].includes(r)) {
-        return `<div class="p-10 text-center"><i data-lucide="lock" class="w-16 h-16 text-red-200 mx-auto mb-4"></i><h2 class="text-2xl font-black">Ruxsat yo'q</h2></div>`;
-    }
-
-    const msgs = db.staffChatMessages || [];
-
-    setTimeout(() => {
-        const area = document.getElementById('staff-chat-messages-area');
-        if (area) area.scrollTop = area.scrollHeight;
-    }, 100);
+async function v_student_attendance() {
+    const att = await getMyAttendance().catch(() => []);
+    const present = att.filter(a => a.status === 'present').length;
+    const pct = att.length ? Math.round((present / att.length) * 100) : 0;
 
     return `
-    <div class="chat-container">
-        <div class="p-6 border-b border-indigo-100 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-white relative z-10">
-            <div class="flex items-center gap-4">
-                <div class="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center font-black shadow-lg shadow-indigo-600/30">
-                    <i data-lucide="shield" class="w-6 h-6"></i>
+        ${pageHead('Mening davomatim', '', `<button class="btn btn-primary" onclick="geoCheckin(this)"><i data-lucide="map-pin"></i> Lokatsiya orqali`)}
+        <div class="grid grid-3 mb-6">
+            ${statTile({ label: 'Davomat', value: `${pct}%`, icon: 'user-check', tone: pct >= 70 ? 'green' : 'amber' })}
+            ${statTile({ label: 'Kelgan kun', value: present, icon: 'calendar-check', tone: 'green' })}
+            ${statTile({ label: 'Jami yozuv', value: att.length, icon: 'calendar-days' })}
+        </div>
+        ${sectionCard('Tarix', att.length === 0
+            ? emptyState('calendar-x', 'Hozircha yozuv yo‘q', 'Darsga kelganingizda avtomatik qo‘shiladi.')
+            : `<div class="grid grid-4">${[...att].reverse().map(a => `
+                <div class="stat" style="text-align:center;padding:14px">
+                    <div class="t-sm fw-8">${esc(a.date)}</div>
+                    <div class="mt-2"><span class="badge ${a.status === 'present' ? 'badge-green' : 'badge-red'}">${a.status === 'present' ? 'Kelgan' : 'Kelmagan'}</span></div>
+                </div>`).join('')}</div>`, { icon: '<i data-lucide="calendar-check"></i>' })}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: grades
+// ══════════════════════════════════════════════════════════════════════
+async function v_grades() {
+    const u = STATE.user;
+
+    if (u.role === 'student' || u.role === 'parent') {
+        const [grades, courses] = await Promise.all([getGrades(), getCourses()]);
+        if (grades.length === 0) {
+            return pageHead('Baholarim', '') + emptyState('graduation-cap', 'Hali baho yo‘q', 'O‘qituvchi baho qo‘yganida shu yerda ko‘rinadi.');
+        }
+        const avg = (grades.reduce((a, g) => a + num(g.value), 0) / grades.length).toFixed(2);
+        const best = Math.max(...grades.map(g => num(g.value)));
+        return `
+            ${pageHead('Baholarim', `${grades.length} ta baho`)}
+            <div class="grid grid-3 mb-6">
+                ${statTile({ label: 'O‘rtacha baho', value: avg, icon: 'trending-up', tone: num(avg) >= 4 ? 'green' : 'amber' })}
+                ${statTile({ label: 'Eng yuqori', value: best, icon: 'arrow-up', tone: 'green' })}
+                ${statTile({ label: 'Jami baho', value: grades.length, icon: 'graduation-cap' })}
+            </div>
+            <div class="stack-sm">
+                ${grades.map(g => {
+                    const c = courses.find(x => x.id === g.courseId);
+                    return `
+                    <div class="card card-pad-sm">
+                        <div class="d-flex items-center gap-3">
+                            <div class="card-icon" style="width:40px;height:40px"><i data-lucide="book-open"></i></div>
+                            <div class="grow" style="min-width:0">
+                                <div class="list-title truncate">${esc(c?.title || `Kurs #${g.courseId}`)}</div>
+                                <div class="list-sub">${esc(g.date || '')}${g.comment ? ` · ${esc(g.comment)}` : ''}</div>
+                            </div>
+                            ${gradePill(g.value)}
+                        </div>
+                    </div>`;
+                }).join('')}
+            </div>`;
+    }
+
+    if (u.role === 'director') {
+        const [grades, users, courses] = await Promise.all([getGrades(), getUsers(), getCourses()]);
+        if (grades.length === 0) return pageHead('Baholar', '') + emptyState('graduation-cap', 'Hali baho yo‘q');
+        return `
+            ${pageHead('Barcha baholar', `${grades.length} ta baho`)}
+            <section class="card"><div class="table-wrap"><table class="table responsive">
+                <thead><tr><th>Talaba</th><th>Kurs</th><th data-label="Baho">Baho</th><th data-label="Sana">Sana</th></tr></thead>
+                <tbody>${grades.map(g => `
+                    <tr>
+                        <td data-label="Talaba"><span class="cell-main">${esc(users.find(x => x.id === g.studentId)?.ism || `#${g.studentId}`)}</span></td>
+                        <td data-label="Kurs"><span class="cell-sub">${esc(courses.find(x => x.id === g.courseId)?.title || `#${g.courseId}`)}</span></td>
+                        <td data-label="Baho">${gradePill(g.value)}</td>
+                        <td data-label="Sana"><span class="cell-sub">${esc(g.date || '')}</span></td>
+                    </tr>`).join('')}</tbody>
+            </table></div></section>`;
+    }
+
+    // ustoz / admin
+    const [users, courses, myGrades] = await Promise.all([getUsers(), getCourses(), getGrades()]);
+    const students = users.filter(x => x.role === 'student');
+    const sid = STATE.activeGradeStudent || students[0]?.id;
+    STATE.activeGradeStudent = sid;
+    window.__gradeStudents = students;
+    window.__gradeCourses = courses;
+
+    return `
+        ${pageHead('Baholar', 'Talabani tanlang va baho qo‘ying')}
+
+        <div class="split split-side">
+            <section class="card" style="max-height:70vh;overflow-y:auto">
+                <div class="card-pad-sm" style="border-bottom:1px solid var(--border)">
+                    <div class="input-icon">
+                        <i data-lucide="search"></i>
+                        <input class="input" id="grade-search" placeholder="Talaba…" oninput="window.__filterGradeStudents()">
+                    </div>
                 </div>
-                <div>
-                    <h2 class="text-xl font-black text-slate-800">Jamoa Chati</h2>
-                    <div class="flex items-center gap-2">
-                        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">USTOZLAR VA RAHBARIYAT UCHUN</p>
+                <div class="list" id="grade-students">
+                    ${students.length === 0 ? '<div class="card-pad"><div class="form-hint">Talaba yo‘q</div></div>' :
+                        students.map(s => `
+                        <button class="list-row click w-full text-left ${s.id === sid ? '' : ''}" data-name="${esc(s.ism.toLowerCase())}"
+                                style="${s.id === sid ? 'background:var(--blue-50);border-left:3px solid var(--primary)' : ''}"
+                                onclick="window.__pickGradeStudent(${s.id})">
+                            ${avatarHtml(s, 'avatar-sm')}
+                            <div class="grow" style="min-width:0">
+                                <div class="list-title truncate">${esc(s.ism)}</div>
+                                <div class="list-sub truncate">${esc(s.email)}</div>
+                            </div>
+                        </button>`).join('')}
+                </div>
+            </section>
+
+            <div class="stack" id="grade-panel"></div>
+        </div>`;
+}
+
+window.__filterGradeStudents = () => {
+    const q = (document.getElementById('grade-search')?.value || '').toLowerCase();
+    document.querySelectorAll('#grade-students .list-row').forEach(el => {
+        el.classList.toggle('hidden', !el.dataset.name.includes(q));
+    });
+};
+
+window.__pickGradeStudent = (sid) => { STATE.activeGradeStudent = sid; renderView('grades'); };
+
+window.__loadGradePanel = async () => {
+    const sid = STATE.activeGradeStudent;
+    mount('grade-panel', async () => {
+        if (!sid) return emptyState('users', 'Talaba tanlang');
+        const [grades, courses] = await Promise.all([getStudentGrades(sid), getCourses()]);
+        const avg = grades.length ? (grades.reduce((a, g) => a + num(g.value), 0) / grades.length).toFixed(2) : '—';
+
+        return `
+            ${sectionCard('Yangi baho', `
+                <form id="form-grade" class="stack" onsubmit="return window.__svGrade(event, ${sid})">
+                    <div class="field">
+                        <label class="label">Kurs</label>
+                        <select class="select" name="courseId" id="grade-course" required>
+                            <option value="">Kursni tanlang</option>
+                            ${courses.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="label">Baho</label>
+                        <div class="d-flex gap-2 flex-wrap">
+                            ${[5, 4, 3, 2, 1].map(v => `
+                            <button type="button" class="grade-pick" data-v="${v}" onclick="window.__pickGrade(${v},this)">${v}</button>`).join('')}
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="label">Izoh (ixtiyoriy)</label>
+                        <input class="input" name="comment" placeholder="Masalan: Ajoyib ish!">
+                    </div>
+                    <button type="submit" class="btn btn-primary"><i data-lucide="plus"></i> Baho qo‘yish</button>
+                </form>`, { icon: '<i data-lucide="graduation-cap"></i>' })}
+
+            ${sectionCard('Baho tarixi', grades.length === 0
+                ? emptyState('graduation-cap', 'Bu talabada baho yo‘q')
+                : `
+                <div class="d-flex items-center justify-between mb-4">
+                    <span class="t-sm c-muted">O‘rtacha baho</span>
+                    <span class="t-xl fw-9">${avg}</span>
+                </div>
+                <div class="stack-sm">
+                    ${grades.map(g => `
+                        <div class="grade-row g${g.value}">
+                            <div style="min-width:0">
+                                <div class="fw-8 t-sm truncate">${esc(courses.find(c => c.id === g.courseId)?.title || `Kurs #${g.courseId}`)}</div>
+                                <div class="t-xs c-muted">${esc(g.date || '')}${g.comment ? ` · ${esc(g.comment)}` : ''}</div>
+                            </div>
+                            <div class="d-flex items-center gap-2">
+                                ${gradePill(g.value)}
+                                <button class="btn-icon sm" onclick="window.__delGrade(${g.id})" aria-label="O’chirish"><i data-lucide="trash-2"></i></button>
+                            </div>
+                        </div>`).join('')}
+                </div>`, { icon: '<i data-lucide="history"></i>' })}`;
+    });
+};
+
+window.__pickGrade = (v, el) => {
+    document.querySelectorAll('.grade-pick').forEach(b => b.classList.remove('picked'));
+    el.classList.add('picked', `g${v}`);
+    const input = document.getElementById('grade-value');
+    if (input) input.value = v;
+    STATE.pickedGrade = v;
+};
+
+window.__svGrade = async (e, sid) => {
+    e.preventDefault();
+    const courseId = document.getElementById('grade-course')?.value;
+    const value = STATE.pickedGrade;
+    if (!courseId) { showToast('Kursni tanlang', 'error'); return false; }
+    if (!value) { showToast('Bahoni tanlang', 'error'); return false; }
+    const comment = new FormData(e.target).get('comment');
+    try {
+        await api_post('/grades', { studentId: sid, courseId: Number(courseId), value, comment });
+        showToast('Baho qo‘yildi', 'success');
+        STATE.pickedGrade = null;
+        window.__loadGradePanel();
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+window.__delGrade = async (id) => {
+    if (!confirm('Bahoni o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/grades/${id}`); showToast('Baho o‘chirildi', 'success'); window.__loadGradePanel(); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: reports & analytics
+// ══════════════════════════════════════════════════════════════════════
+async function v_reports() {
+    const [users, groups, courses, grades, att] = await Promise.all([
+        getUsers(), getGroups(), getCourses(), getGrades(), getAttendance().catch(() => []),
+    ]);
+    const students = users.filter(u => u.role === 'student');
+
+    const present = att.reduce((a, r) => a + Object.values(r.records || {}).filter(v => v === 'present').length, 0);
+    const absent = att.reduce((a, r) => a + Object.values(r.records || {}).filter(v => v === 'absent').length, 0);
+    const attPct = (present + absent) ? Math.round((present / (present + absent)) * 100) : 0;
+    const avgGrade = grades.length ? (grades.reduce((a, g) => a + num(g.value), 0) / grades.length).toFixed(2) : '0';
+    const totalXp = students.reduce((a, u) => a + num(u.points), 0);
+
+    return `
+        ${pageHead('Hisobotlar', 'Platforma bo‘yicha umumiy statistika', `
+            <button class="btn btn-outline" onclick="window.__printReport()"><i data-lucide="printer"></i> Chop etish</button>`)}
+
+        <div class="grid grid-4 mb-6">
+            ${statTile({ label: 'Talabalar', value: students.length, icon: 'users' })}
+            ${statTile({ label: 'O‘rtacha baho', value: avgGrade, icon: 'graduation-cap', tone: num(avgGrade) >= 4 ? 'green' : 'amber' })}
+            ${statTile({ label: 'Davomat', value: `${attPct}%`, icon: 'user-check', tone: attPct >= 70 ? 'green' : 'red' })}
+            ${statTile({ label: 'Jami XP', value: totalXp, icon: 'zap', tone: 'accent' })}
+        </div>
+
+        <div class="split split-half">
+            ${sectionCard('Guruhlar reytingi', `
+                <div class="stack-sm">
+                    ${groups.map((g, i) => {
+                        const xp = g.studentIds.reduce((a, id) => a + num(students.find(s => s.id === id)?.points), 0);
+                        return `
+                        <div class="d-flex items-center gap-3">
+                            <div class="rank-medal ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</div>
+                            <div class="grow" style="min-width:0">
+                                <div class="list-title truncate">${esc(g.name)}</div>
+                                <div class="list-sub">${(g.studentIds || []).length} talaba</div>
+                            </div>
+                            <span class="badge badge-orange">${xp} XP</span>
+                        </div>`;
+                    }).join('') || '<div class="form-hint">Guruhlar yo‘q</div>'}
+                </div>`, { icon: '<i data-lucide="trophy"></i>' })}
+
+            ${sectionCard('Kurslar bo‘yicha baholar', courses.length === 0
+                ? emptyState('book-open', 'Kurslar yo‘q')
+                : (() => {
+                    const byCourse = {};
+                    grades.forEach(g => { (byCourse[g.courseId] ||= []).push(num(g.value)); });
+                    const rows = Object.entries(byCourse).map(([cid, vals]) => ({
+                        course: courses.find(c => c.id === Number(cid)),
+                        avg: vals.reduce((a, v) => a + v, 0) / vals.length,
+                        count: vals.length,
+                    })).sort((a, b) => b.avg - a.avg);
+
+                    return `<div class="stack-sm">
+                        ${rows.map(r => `
+                        <div>
+                            <div class="d-flex items-center justify-between mb-2">
+                                <span class="t-sm fw-7 truncate">${esc(r.course?.title || 'Noma\'lum')}</span>
+                                <span class="fw-8 t-sm c-primary">${r.avg.toFixed(2)}</span>
+                            </div>
+                            ${progressBar(Math.round((r.avg / 5) * 100), r.avg >= 4 ? 'green' : '')}
+                            <div class="t-xs c-soft mt-1">${r.count} ta baho</div>
+                        </div>`).join('')}
+                    </div>`;
+                })(), { icon: '<i data-lucide="bar-chart-3"></i>' })}
+        </div>
+
+        <div class="mt-6">
+            ${sectionCard('Talabalar reytingi', `
+                <div class="table-wrap"><table class="table responsive">
+                    <thead><tr><th>#</th><th>Talaba</th><th data-label="Guruh">Guruh</th><th data-label="Ball">Ball</th><th data-label="O‘yin">O‘yin ballari</th></tr></thead>
+                    <tbody>${[...students].sort((a, b) => num(b.points) - num(a.points)).slice(0, 25).map((s, i) => `
+                        <tr>
+                            <td data-label="#"><span class="rank-medal ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</span></td>
+                            <td data-label="Talaba"><div class="d-flex items-center gap-2">${avatarHtml(s, 'avatar-xs')}<span class="cell-main">${esc(s.ism)}</span></div></td>
+                            <td data-label="Guruh"><span class="cell-sub">${esc(groups.find(g => g.id === s.groupId)?.name || '—')}</span></td>
+                            <td data-label="Ball"><span class="badge badge-orange">${num(s.points)}</span></td>
+                            <td data-label="O‘yin"><span class="cell-sub">${num(s.duelWins)}</span></td>
+                        </tr>`).join('')}</tbody>
+                </table></div>`, { icon: '<i data-lucide="users"></i>' })}
+        </div>`;
+}
+window.__printReport = () => window.print();
+
+async function v_analytics() {
+    const [users, groups, att, grades] = await Promise.all([
+        getUsers(), getGroups(), getAttendance().catch(() => []), getGrades(),
+    ]);
+    const students = users.filter(u => u.role === 'student');
+
+    // distribution by points buckets
+    const buckets = [
+        { label: '0–500', min: 0, max: 500 },
+        { label: '500–2 000', min: 500, max: 2000 },
+        { label: '2 000–5 000', min: 2000, max: 5000 },
+        { label: '5 000+', min: 5000, max: Infinity },
+    ].map(b => ({ ...b, count: students.filter(s => num(s.points) >= b.min && num(s.points) < b.max).length }));
+    const maxCount = Math.max(1, ...buckets.map(b => b.count));
+
+    const gradeDist = [5, 4, 3, 2, 1].map(v => ({ v, count: grades.filter(g => num(g.value) === v).length }));
+    const maxGrade = Math.max(1, ...gradeDist.map(g => g.count));
+
+    // attendance per group
+    const perGroup = groups.map(g => {
+        let p = 0, a = 0;
+        att.filter(r => r.groupId === g.id).forEach(r => {
+            Object.entries(r.records || {}).forEach(([sid, v]) => {
+                if ((g.studentIds || []).includes(Number(sid))) v === 'present' ? p++ : a++;
+            });
+        });
+        return { group: g, pct: (p + a) ? Math.round((p / (p + a)) * 100) : 0 };
+    }).sort((x, y) => y.pct - x.pct);
+
+    return `
+        ${pageHead('Analitika', 'Ta’lim jarayoni tahlili')}
+
+        <div class="split split-half mb-6">
+            ${sectionCard('Balllar taqsimoti', `
+                <div class="stack">
+                    ${buckets.map(b => `
+                    <div>
+                        <div class="d-flex items-center justify-between mb-2">
+                            <span class="t-sm fw-7">${b.label} XP</span>
+                            <span class="fw-8 t-sm">${b.count}</span>
+                        </div>
+                        ${progressBar(Math.round((b.count / maxCount) * 100), b.label === '5 000+' ? 'accent' : '')}
+                    </div>`).join('')}
+                </div>`, { icon: '<i data-lucide="bar-chart-3"></i>' })}
+
+            ${sectionCard('Baholar taqsimoti', `
+                <div class="stack">
+                    ${gradeDist.map(g => `
+                    <div>
+                        <div class="d-flex items-center justify-between mb-2">
+                            <span class="d-flex items-center gap-2">${gradePill(g.v)}<span class="t-sm fw-7">baho ${g.v}</span></span>
+                            <span class="fw-8 t-sm">${g.count}</span>
+                        </div>
+                        ${progressBar(Math.round((g.count / maxGrade) * 100), g.v >= 4 ? 'green' : g.v >= 3 ? '' : 'red')}
+                    </div>`).join('')}
+                </div>`, { icon: '<i data-lucide="graduation-cap"></i>' })}
+        </div>
+
+        <div class="mt-6">
+            ${sectionCard('Guruhlar bo‘yicha davomat', perGroup.length === 0
+                ? emptyState('users-round', 'Ma’lumot yo‘q')
+                : `<div class="stack">
+                    ${perGroup.map(g => `
+                    <div>
+                        <div class="d-flex items-center justify-between mb-2">
+                            <span class="t-sm fw-7">${esc(g.group.name)}</span>
+                            <span class="fw-8 t-sm ${g.pct >= 70 ? 'c-green' : 'c-red'}">${g.pct}%</span>
+                        </div>
+                        ${progressBar(g.pct, g.pct >= 70 ? 'green' : 'red')}
+                    </div>`).join('')}
+                </div>`, { icon: '<i data-lucide="user-check"></i>' })}
+        </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: leaderboard
+// ══════════════════════════════════════════════════════════════════════
+async function v_lead() {
+    const lb = await getLeaderboard();
+    const students = lb.students || [];
+    const groups = lb.groups || [];
+    const me = STATE.user;
+    const myRank = [...students].sort((a, b) => num(b.points) - num(a.points)).findIndex(s => s.id === me?.id) + 1;
+
+    return `
+        ${pageHead('Reyting', 'Eng faol o‘quvchilar va guruhlar', `
+            ${myRank > 0 ? `<span class="badge badge-orange t-sm"><i data-lucide="trophy"></i> Sizning o‘rningiz: ${myRank}-o‘rin</span>` : ''}
+        `)}
+
+        <div class="d-flex gap-2 mb-5">
+            <button class="btn btn-primary btn-sm" data-ltab="students" onclick="window.__leadTab('students',this)">Talabalar</button>
+            <button class="btn btn-outline btn-sm" data-ltab="groups" onclick="window.__leadTab('groups',this)">Guruhlar</button>
+        </div>
+
+        <div id="lead-students">
+            ${students.length === 0 ? emptyState('trophy', 'Reyting bo‘sh') : `
+            <div class="grid grid-3 mb-6">
+                ${students.slice(0, 3).map((s, i) => `
+                    <div class="card card-pad text-center ${i === 0 ? 'card-accent' : ''}" style="${i === 0 ? 'border-top:3px solid var(--accent)' : ''}">
+                        <div class="rank-medal ${i === 0 ? 'gold' : i === 1 ? 'silver' : 'bronze'} mx-auto mb-3" style="width:52px;height:52px;font-size:1.125rem">${i + 1}</div>
+                        ${avatarHtml(s, 'avatar-lg mx-auto', i === 0 ? 'avatar-accent' : '')}
+                        <div class="fw-8 mt-3 truncate">${esc(s.ism)}</div>
+                        <div class="badge badge-orange mt-2">${num(s.points)} XP</div>
+                    </div>`).join('')}
+            </div>
+            <section class="card"><div class="list list-flush">
+                ${students.slice(3).map((s, i) => `
+                    <div class="list-row">
+                        <div class="rank-medal">${i + 4}</div>
+                        ${avatarHtml(s, 'avatar-sm')}
+                        <div class="grow" style="min-width:0">
+                            <div class="list-title truncate">${esc(s.ism)}</div>
+                            <div class="list-sub">${(s.achievements || []).length} yutuq · ${num(s.duelWins)} o‘yin balli</div>
+                        </div>
+                        <span class="badge badge-orange">${num(s.points)} XP</span>
+                    </div>`).join('') || '<div class="list-row"><span class="c-soft t-sm">Ko‘proq o‘quvchilar yo‘q</span></div>'}
+            </div></section>`}
+        </div>
+
+        <div id="lead-groups" class="hidden">
+            ${groups.length === 0 ? emptyState('users-round', 'Guruhlar yo‘q') : `
+            <div class="stack">
+                ${groups.map((g, i) => `
+                    <div class="card card-pad-sm">
+                        <div class="d-flex items-center gap-3">
+                            <div class="rank-medal ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''}">${i + 1}</div>
+                            <div class="grow" style="min-width:0">
+                                <div class="list-title">${esc(g.name)}</div>
+                                <div class="list-sub">${g.studentCount} talaba</div>
+                            </div>
+                            <span class="badge badge-orange">${num(g.totalXP)} XP</span>
+                        </div>
+                    </div>`).join('')}
+            </div>`}
+        </div>`;
+}
+window.__leadTab = (tab, btn) => {
+    ['students', 'groups'].forEach(t => {
+        const el = document.getElementById(`lead-${t}`);
+        el?.classList.toggle('hidden', t !== tab);
+    });
+    document.querySelectorAll('[data-ltab]').forEach(b => {
+        b.classList.toggle('btn-primary', b.dataset.ltab === tab);
+        b.classList.toggle('btn-outline', b.dataset.ltab !== tab);
+    });
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: support (tickets)
+// ══════════════════════════════════════════════════════════════════════
+async function v_support() {
+    const isStaffSide = canManage() || STATE.user.role === 'director';
+    return `
+        ${pageHead(isStaffSide ? 'Ticketlar' : 'Yordam', isStaffSide ? 'Foydalanuvchilar murojaatlari' : 'Savolingizni yozing — biz tez orada javob beramiz')}
+
+        ${sectionCard('Yangi murojaat', `
+            <form class="stack" onsubmit="return window.__svTicket(event)">
+                <textarea class="textarea" id="ticket-msg" required placeholder="Murojaatingizni yozing…"></textarea>
+                <button class="btn btn-primary"><i data-lucide="send"></i> Yuborish</button>
+            </form>`, { icon: '<i data-lucide="message-square-plus"></i>' })}
+
+        <div class="mt-6" id="tickets-list"></div>`;
+}
+
+function loadTickets() {
+    mount('tickets-list', async () => {
+        const tickets = await getTickets();
+        if (tickets.length === 0) return emptyState('inbox', 'Ticketlar yo‘q');
+        return `<section class="card"><div class="list list-flush">
+            ${tickets.map(t => `
+                <button class="list-row click w-full text-left" onclick="openTicketModal(${t.id})">
+                    <div class="card-icon ${t.status === 'Yopilgan' ? 'green' : 'amber'}" style="width:34px;height:34px">
+                        <i data-lucide="life-buoy"></i>
+                    </div>
+                    <div class="grow" style="min-width:0">
+                        <div class="list-title truncate">${esc(t.message)}</div>
+                        <div class="list-sub">
+                            #${t.id} · ${esc(t.user_name || '')} · ${(t.replies || []).length} javob
+                        </div>
+                    </div>
+                    <span class="badge ${t.status === 'Yopilgan' ? 'badge-green' : 'badge-amber'}">${esc(t.status)}</span>
+                    <i data-lucide="chevron-right" style="color:var(--gray-300)"></i>
+                </button>`).join('')}
+        </div></section>`;
+    });
+}
+
+window.__svTicket = async (e) => {
+    e.preventDefault();
+    const el = document.getElementById('ticket-msg');
+    const message = el?.value.trim();
+    if (!message) return false;
+    try {
+        await api_post('/tickets', { message });
+        showToast('Murojaat yuborildi', 'success');
+        el.value = '';
+        loadTickets();
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: chat
+// ══════════════════════════════════════════════════════════════════════
+function chatShell({ title, sub, gid, isStaff = false, id }) {
+    return `
+        <div class="chat" id="${id}-box">
+            <div class="chat-head">
+                <div class="card-icon" style="width:36px;height:36px"><i data-lucide="${isStaff ? 'shield' : 'users-round'}"></i></div>
+                <div class="grow" style="min-width:0">
+                    <div class="fw-8 truncate" style="font-size:.9375rem">${esc(title)}</div>
+                    <div class="t-xs c-muted truncate">${esc(sub)}</div>
+                </div>
+            </div>
+            <div class="chat-body" id="${id}-body">
+                <div class="loading-box"><span class="spinner"></span></div>
+            </div>
+            <form class="chat-form" onsubmit="return window.__svChat(event, ${isStaff}, ${gid})">
+                <textarea class="textarea" id="${id}-input" rows="1" placeholder="Xabar yozing…" style="min-height:46px;max-height:120px"></textarea>
+                <button class="btn btn-primary" style="height:46px;width:46px;padding:0" aria-label="Yuborish">
+                    <i data-lucide="send"></i>
+                </button>
+            </form>
+        </div>`;
+}
+
+function renderMessages(container, msgs) {
+    if (msgs.length === 0) {
+        container.innerHTML = '<div class="chat-empty">Hali xabar yo‘q. Birinchi xabarni siz yozing!</div>';
+        return;
+    }
+    container.innerHTML = msgs.map(m => {
+        const mine = m.userId === STATE.user.id;
+        return `
+            <div class="msg ${mine ? 'me' : 'other'}">
+                ${!mine ? `<div class="t-xs fw-7 c-muted mb-1" style="margin-left:4px">${esc(m.userName || '')}</div>` : ''}
+                <div class="msg-bubble">${esc(m.text)}</div>
+                <div class="msg-meta">${esc(m.time || '')}</div>
+            </div>`;
+    }).join('');
+    container.scrollTop = container.scrollHeight;
+}
+
+async function v_chat() {
+    const g = await getMyGroup();
+    if (!g) {
+        return pageHead('Guruh chat', '')
+            + emptyState('message-circle-off', 'Guruh biriktirilmagan', 'Chatga kirish uchun siz biror guruhga biriktirilishingiz kerak.');
+    }
+    window.__myGroup = g;
+    return `
+        ${pageHead('Guruh chat', g.name)}
+        ${chatShell({ title: g.name, sub: `${(g.studentIds || []).length} ishtirokchi`, gid: g.id, id: 'gchat' })}`;
+}
+
+async function v_staff_chat() {
+    return `
+        ${pageHead('Xodimlar chat', 'Faqat xodimlar uchun')}
+        ${chatShell({ title: 'Xodimlar', sub: 'Ichki muhokama', gid: 0, isStaff: true, id: 'schat' })}`;
+}
+
+async function loadChat(kind) {
+    const isStaff = kind === 'staff';
+    const bodyId = isStaff ? 'schat-body' : 'gchat-body';
+    const gid = isStaff ? 0 : (window.__myGroup?.id ?? STATE.user.groupId);
+    const box = document.getElementById(bodyId);
+    if (!box) return;
+
+    try {
+        const msgs = isStaff ? await api_get('/staff-chat') : await api_get(`/chat/${gid}`);
+        renderMessages(box, msgs || []);
+    } catch (e) {
+        box.innerHTML = `<div class="chat-empty">Xabarlarni yuklab bo‘lmadi: ${esc(e.message)}</div>`;
+    }
+}
+window.__reloadChat = loadChat;
+
+window.__svChat = async (e, isStaff, gid) => {
+    e.preventDefault();
+    const id = isStaff ? 'schat' : 'gchat';
+    const el = document.getElementById(`${id}-input`);
+    const text = el?.value.trim();
+    if (!text) return false;
+    el.value = '';
+    try {
+        if (isStaff) await api_post('/staff-chat', { text });
+        else await api_post('/chat', { groupId: gid, text });
+        loadChat(isStaff ? 'staff' : 'group');
+    } catch (err) {
+        showToast(err.message, 'error');
+        el.value = text;
+    }
+    return false;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: library
+// ══════════════════════════════════════════════════════════════════════
+async function v_library() {
+    const books = await getBooks();
+    const canEdit = canManage();
+    return `
+        ${pageHead('Kutubxona', `${books.length} ta kitob`, canEdit
+            ? `<button class="btn btn-primary" onclick="window.__openBookEditor()"><i data-lucide="plus"></i> Kitob qo‘shish</button>` : '')}
+        ${books.length === 0
+            ? emptyState('library', 'Kutubxona bo‘sh', 'Kitoblar tez orada qo‘shiladi.')
+            : `<div class="grid grid-auto">
+                ${books.map(b => {
+                    const hasLink = !!(b.link && b.link !== '#');
+                    return `
+                <article class="card card-pad card-hover d-flex flex-col gap-3">
+                    <div class="book-cover">
+                        ${b.image
+                            ? `<img src="${esc(b.image)}" alt="${esc(b.title)}" loading="lazy">`
+                            : `<span class="book-cover-emoji"><i data-lucide="book-open"></i></span>`}
+                        <span class="book-cover-tag">PDF</span>
+                    </div>
+                    <div class="grow">
+                        <h3 class="tile-title">${esc(b.title)}</h3>
+                        <p class="tile-sub clamp-3 mt-2">${esc(b.description || '')}</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm grow" onclick="window.__dlBook(${b.id},this)">
+                            <i data-lucide="download"></i> PDF yuklab olish
+                        </button>
+                        ${hasLink ? `<a class="btn btn-soft btn-sm" href="${esc(b.link)}" target="_blank" rel="noopener" aria-label="Onlayn ochish">
+                            <i data-lucide="external-link"></i></a>` : ''}
+                        ${canEdit ? `
+                        <button class="btn-icon sm" onclick="window.__delBook(${b.id})" aria-label="O’chirish"><i data-lucide="trash-2"></i></button>` : ''}
+                    </div>
+                </article>`;
+                }).join('')}
+            </div>`}`;
+}
+
+// PDF yuklab olish — token'ni query orqali ham yuboramiz, endpoint
+// @jwt_required(optional=True) bo'lgani uchun ochiq ham ishlaydi.
+window.__dlBook = (id, btn) => {
+    const restore = () => {
+        if (!btn) return;
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="download"></i> PDF yuklab olish';
+        safeLucide(btn);
+    };
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:15px;height:15px"></span> Tayyorlanmoqda…';
+    }
+    const url = `/api/books/${id}/download`;
+    const token = getAuthToken();
+    fetch(token ? `${url}?token=${encodeURIComponent(token)}` : url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+        .then(r => {
+            if (!r.ok) throw new Error('PDF tayyorlanmadi');
+            const cd = r.headers.get('Content-Disposition') || '';
+            const m = cd.match(/filename="?([^";]+)"?/);
+            return r.blob().then(b => ({ blob: b, name: m ? m[1] : 'kitob.pdf' }));
+        })
+        .then(({ blob, name }) => {
+            const href = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = href;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(href), 4000);
+            showToast('PDF yuklab olindi', 'success');
+            restore();
+        })
+        .catch(e => { showToast(e.message, 'error'); restore(); });
+};
+
+window.__openBookEditor = () => {
+    openModal(modalShell({
+        icon: '<i data-lucide="book-plus"></i>',
+        title: 'Yangi kitob',
+        body: `
+            <form id="form-book" class="stack" onsubmit="return window.__svBook(event)">
+                <div class="field"><label class="label">Nomi</label>
+                    <input class="input" name="title" required placeholder="Python for Beginners"></div>
+                <div class="field"><label class="label">Tavsif</label>
+                    <textarea class="textarea" name="description"></textarea></div>
+                <div class="field"><label class="label">Rasm havolasi</label>
+                    <input class="input" name="image" placeholder="https://…"></div>
+                <div class="field"><label class="label">Havola</label>
+                    <input class="input" name="link" placeholder="https://…"></div>
+            </form>`,
+        footer: `
+            <button class="btn btn-outline" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="document.getElementById('form-book').requestSubmit()">
+                <i data-lucide="save"></i> Saqlash</button>`,
+    }));
+};
+
+window.__svBook = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api_post('/books', f); showToast('Kitob qo‘shildi', 'success'); cModal(); renderView('library'); }
+    catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+window.__delBook = async (id) => {
+    if (!confirm('Kitobni o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/books/${id}`); showToast('Kitob o‘chirildi', 'success'); renderView('library'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: mini o'yin
+// ══════════════════════════════════════════════════════════════════════
+async function v_game() {
+    const best = num(STATE.user?.duelWins);
+    return `
+        ${pageHead('Mini o‘yin', 'Tezkor test — har bir to‘g‘ri javob uchun ball', `
+            <span class="badge badge-orange"><i data-lucide="zap"></i> +30 XP</span>`)}
+
+        <div id="quiz-root">
+            <div class="game-intro card card-pad-lg">
+                <div class="game-intro-glow"></div>
+                <div class="game-badge-big">🕹️</div>
+                <h2 class="t-2xl fw-9 mt-4">Mini o‘yinga tayyor</h2>
+                <p class="c-muted mt-2" style="max-width:34rem;margin-inline:auto">
+                    10 ta savol beriladi. Har bir savol uchun 15 soniya bor —
+                    vaqt tugasa javob noto‘g‘ri hisoblanadi. Natija foiz bo‘yicha:
+                    <b>80%+</b> — 30 XP, <b>50%+</b> — 15 XP.
+                </p>
+                <div class="game-rules">
+                    <div class="game-rule"><i data-lucide="timer"></i> 15 soniya / savol</div>
+                    <div class="game-rule"><i data-lucide="trophy"></i> Rekor: ${best}</div>
+                    <div class="game-rule"><i data-lucide="zap"></i> +30 XP</div>
+                </div>
+                <button class="btn btn-primary btn-lg mt-6" onclick="startGameQuiz('mini_game')">
+                    <i data-lucide="play"></i> O‘yinni boshlash
+                </button>
+            </div>
+        </div>`;
+}
+
+window.startGameQuiz = async (type) => {
+    const root = document.getElementById('quiz-root');
+    if (!root) return;
+    root.innerHTML = '<div class="loading-box"><span class="spinner"></span> Savollar yuklanmoqda…</div>';
+
+    try {
+        const all = await getQuestions();
+        // Eski ma'lumotlarda tur 'miniGame' deb yozilgan bo'lishi mumkin —
+        // QUIZ_TYPE orqali bittaga keltiramiz, aks holda mini o'yin
+        // o'z savollarini topa olmaydi.
+        const want = QUIZ_TYPE(type);
+        const pool = (all || []).filter(q => QUIZ_TYPE(q.type) === want);
+        const list = (pool.length ? pool : all || []).slice(0, 10);
+        if (list.length === 0) {
+            root.innerHTML = emptyState('circle-help', 'Savollar yo‘q',
+                'Bu turdagi savollar bazaga qo‘shilmagan.',
+                isStaff() ? `<button class="btn btn-primary" onclick="go('questions')"><i data-lucide="plus"></i> Savol qo‘shish</button>` : '');
+            safeLucide(root);
+            return;
+        }
+
+        const state = { i: 0, score: 0, total: list.length, locked: false, list, timer: null, left: 15 };
+        STATE.quiz = state;
+
+        const clearTimer = () => { if (state.timer) { clearInterval(state.timer); state.timer = null; } };
+
+        const draw = () => {
+            if (state.i >= state.list.length) return drawResult();
+            const q = state.list[state.i];
+            const opts = ['A', 'B', 'C', 'D'].map(L => ({ L, text: q[`option${L}`] })).filter(o => o.text);
+            state.left = 15;
+            root.innerHTML = `
+                <div class="game-stage card card-pad-lg">
+                    <div class="game-top">
+                        <span class="badge badge-blue"><i data-lucide="list-checks"></i> Savol ${state.i + 1}/${state.list.length}</span>
+                        <span class="game-timer" id="game-timer"><i data-lucide="timer"></i> <b>15</b>s</span>
+                        <span class="badge badge-green"><i data-lucide="zap"></i> ${state.score}</span>
+                    </div>
+                    ${progressBar(Math.round((state.i / state.list.length) * 100), 'accent')}
+
+                    <h2 class="game-q mt-5">${esc(q.questionText)}</h2>
+
+                    <div class="game-opts mt-5">
+                        ${opts.map(o => `
+                        <button class="game-opt" data-key="${o.L}" onclick="window.__answer('${o.L}',this)">
+                            <span class="game-opt-key">${o.L}</span>
+                            <span class="grow">${esc(o.text)}</span>
+                            <i class="game-opt-mark" data-lucide="check"></i>
+                        </button>`).join('')}
+                    </div>
+                </div>`;
+            safeLucide(root);
+            clearTimer();
+            const el = document.getElementById('game-timer');
+            state.timer = setInterval(() => {
+                state.left -= 1;
+                if (el) {
+                    el.querySelector('b').textContent = Math.max(0, state.left);
+                    el.classList.toggle('hot', state.left <= 5);
+                }
+                if (state.left <= 0) {
+                    clearTimer();
+                    const btns = root.querySelectorAll('.game-opt');
+                    const right = root.querySelector(`.game-opt[data-key="${q.correctAnswer}"]`)
+                        || [...btns].find(b => b.textContent.trim().startsWith(q.correctAnswer));
+                    if (right) right.classList.add('right');
+                    setTimeout(() => { state.i++; state.locked = false; draw(); }, 1100);
+                }
+            }, 1000);
+        };
+
+        const drawResult = () => {
+            clearTimer();
+            const pct = Math.round((state.score / state.total) * 100);
+            const medal = pct >= 80 ? '🏆' : pct >= 50 ? '🥈' : '💪';
+            const word = pct >= 80 ? 'Ajoyib natija!' : pct >= 50 ? 'Yaxshi, davom eting!' : 'Yana harakat qiling!';
+            root.innerHTML = `
+                <div class="game-over card card-pad-lg">
+                    <div class="confetti" aria-hidden="true"></div>
+                    <div class="game-medal">${medal}</div>
+                    <h2 class="t-2xl fw-9 mt-3">${state.score} / ${state.total}</h2>
+                    <div class="game-pct"><b>${pct}%</b> to‘g‘ri javob</div>
+                    <p class="c-muted mt-2">${word}</p>
+                    ${state.score > 0 ? `
+                        <div class="game-xp"><i data-lucide="zap"></i> +${pct >= 80 ? 30 : 15} XP qo‘shilmoqda…</div>` : ''}
+                    <div class="d-flex gap-2 justify-center mt-6 flex-wrap">
+                        <button class="btn btn-primary" onclick="startGameQuiz('${type}')"><i data-lucide="rotate-cw"></i> Qayta o‘ynash</button>
+                        <button class="btn btn-outline" onclick="go('shop')"><i data-lucide="shopping-bag"></i> Do‘kon</button>
+                    </div>
+                </div>`;
+            safeLucide(root);
+            if (state.score > 0) {
+                addPoints(pct >= 80 ? 30 : 15, 'Mini o‘yin', 'mini_game');
+            }
+        };
+
+        window.__answer = (letter, btn) => {
+            if (state.locked) return;
+            state.locked = true;
+            clearTimer();
+            const q = state.list[state.i];
+            const correct = q.correctAnswer === letter;
+            if (correct) state.score++;
+            btn.classList.add(correct ? 'right' : 'wrong');
+            if (!correct) {
+                [...btn.parentElement.children].forEach(b => {
+                    if (b.querySelector('.game-opt-key')?.textContent.trim() === q.correctAnswer) b.classList.add('right');
+                });
+            }
+            setTimeout(() => {
+                state.i++;
+                state.locked = false;
+                draw();
+            }, 1100);
+        };
+
+        draw();
+    } catch (e) {
+        root.innerHTML = emptyState('triangle-alert', 'Savollar yuklanmadi', e.message);
+        safeLucide(root);
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: questions
+// ══════════════════════════════════════════════════════════════════════
+async function v_questions() {
+    const questions = await getQuestions();
+    const canEdit = ['ustoz', 'admin', 'tech_admin'].includes(STATE.user.role);
+
+    return `
+        ${pageHead('Savollar', `${questions.length} ta savol`, canEdit
+            ? `<button class="btn btn-primary" onclick="openQuestionEditor()"><i data-lucide="plus"></i> Savol qo‘shish</button>` : '')}
+        ${questions.length === 0
+            ? emptyState('list-checks', 'Savol bazasi bo‘sh', 'O‘yin va test uchun savollar qo‘shing.')
+            : `<div class="stack-sm">
+                ${questions.map(q => `
+                <div class="card card-pad-sm">
+                    <div class="d-flex items-start gap-3">
+                        <div class="grow" style="min-width:0">
+                            <div class="fw-8" style="font-size:.9375rem">${esc(q.questionText)}</div>
+                            <div class="d-flex gap-2 mt-3 flex-wrap">
+                                ${['A', 'B', 'C', 'D'].map(L => `
+                                <span class="badge ${q.correctAnswer === L ? 'badge-green' : ''}">
+                                    ${L}: ${esc(q[`option${L}`] || '—')}
+                                </span>`).join('')}
+                            </div>
+                            <div class="d-flex gap-2 mt-3">
+                                <span class="badge ${q.type === 'quiz' ? 'badge-violet' : 'badge-blue'}">${esc(QUIZ_TYPE_LABEL[q.type] || 'Mini o‘yin')}</span>
+                                <span class="badge">${esc(q.difficulty || 'medium')}</span>
+                            </div>
+                        </div>
+                        ${canEdit ? `
+                        <div class="d-flex gap-1">
+                            <button class="btn-icon sm" onclick="window.__editQuestion(${q.id})" aria-label="Tahrirlash"><i data-lucide="pencil"></i></button>
+                            <button class="btn-icon sm" onclick="window.__delQuestion(${q.id})" aria-label="O’chirish" style="color:var(--red-500)"><i data-lucide="trash-2"></i></button>
+                        </div>` : ''}
+                    </div>
+                </div>`).join('')}
+            </div>`}`;
+}
+
+window.__editQuestion = async (id) => {
+    const qs = await getQuestions();
+    openQuestionEditor(qs.find(q => q.id === id));
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: schedule
+// ══════════════════════════════════════════════════════════════════════
+async function v_schedule() {
+    const g = await getMyGroup();
+    if (!g) {
+        return pageHead('Dars jadvali') +
+            emptyState('calendar-x', 'Jadval mavjud emas', 'Siz biror guruhga biriktirilmagan.');
+    }
+    window.__myGroup = g;
+
+    const items = (g.schedule || []).filter(s => s && (s.day || s.time || s.subject));
+    const byDay = {};
+    items.forEach(s => { (byDay[s.day] ||= []).push(s); });
+    Object.values(byDay).forEach(list =>
+        list.sort((a, b) => String(a.time || '').localeCompare(String(b.time || ''))));
+
+    const canEdit = ['admin', 'tech_admin', 'director', 'ustoz'].includes(STATE.user.role);
+    const todayName = todayDayName();
+    const totalLessons = items.length;
+    const week = items.reduce((a, s) => a + (+String(s.time || '').match(/\d+/)?.[0] || 0), 0);
+
+    return `
+        ${pageHead('Dars jadvali', `${esc(g.name)} — haftalik jadval`, canEdit
+            ? `<button class="btn btn-primary" onclick="openScheduleEditor(window.__myGroup)">
+                   <i data-lucide="pencil"></i> Jadvalni tahrirlash</button>` : '')}
+
+        <div class="sched-stats">
+            <div class="sched-stat"><i data-lucide="calendar-days"></i>
+                <div><b>${totalLessons}</b><span>dars / hafta</span></div></div>
+            <div class="sched-stat"><i data-lucide="clock"></i>
+                <div><b>${week || totalLessons}</b><span>soat</span></div></div>
+            <div class="sched-stat ${items.some(s => s.day === todayName) ? 'live' : ''}"><i data-lucide="sun"></i>
+                <div><b>${esc(todayName)}</b><span>bugun</span></div></div>
+        </div>
+
+        <div class="sched-week">
+            ${DAYS.map(d => {
+                const list = byDay[d] || [];
+                const isToday = d === todayName;
+                const now = new Date();
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                return `
+                <section class="sched-day${isToday ? ' today' : ''}${list.length ? '' : ' off'}">
+                    <header class="sched-day-head">
+                        <b>${esc(d)}</b>
+                        <span>${list.length ? `${list.length} dars` : 'dam'}</span>
+                    </header>
+                    <div class="sched-day-body">
+                        ${list.length === 0
+                            ? '<div class="sched-empty">Mashg‘ulot yo‘q</div>'
+                            : list.map(s => {
+                                const hh = +String(s.time || '').match(/\d+/)?.[0];
+                                const past = isToday && Number.isFinite(hh) && hh * 60 + 30 < nowMin;
+                                return `
+                                <div class="sched-item${past ? ' past' : ''}">
+                                    <div class="sched-time"><i data-lucide="clock"></i>${esc(s.time || '—')}</div>
+                                    <div class="sched-subject">${esc(s.subject || 'Mashg‘ulot')}</div>
+                                    ${s.teacher ? `<div class="sched-teacher"><i data-lucide="user"></i>${esc(s.teacher)}</div>` : ''}
+                                    ${s.room ? `<div class="sched-room"><i data-lucide="map-pin"></i>${esc(s.room)}</div>` : ''}
+                                </div>`;
+                            }).join('')}
+                    </div>
+                </section>`;
+            }).join('')}
+        </div>
+
+        ${totalLessons === 0 ? `<div class="mt-6">${emptyState('calendar-plus', 'Haftalik jadval to‘ldirilmagan',
+            canEdit ? 'Ustoz yoki administrator jadvalni tahrirlashi kerak.'
+                    : 'Jadvalni ustiziz to‘ldiradi.')}</div>` : ''}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: posts
+// ══════════════════════════════════════════════════════════════════════
+async function v_posts() {
+    const canModerate = canManage();
+    return `
+        ${pageHead('Postlar', 'Platforma yangiliklari va muhokamasi')}
+
+        ${sectionCard('Yangi post', `
+            <form class="stack" onsubmit="return window.__svPost(event)">
+                <input class="input" name="title" placeholder="Sarlavha" required>
+                <textarea class="textarea" name="content" placeholder="Matn…" required></textarea>
+                <button class="btn btn-primary"><i data-lucide="send"></i> Yaratish</button>
+            </form>`, { icon: '<i data-lucide="pen-line"></i>', sub: canModerate ? 'Postlar darhol e’lon qilinadi' : 'Post tasdiqlanishdan keyin e’lon qilinadi' })}
+
+        <div class="mt-6" id="posts-list"></div>`;
+}
+
+function loadPosts() {
+    mount('posts-list', async () => {
+        const posts = await getPosts();
+        if (posts.length === 0) return emptyState('newspaper', 'Postlar yo‘q', 'Birinchi postni siz yozing!');
+        const me = STATE.user;
+        const canModerate = canManage();
+
+        return posts.map(p => {
+            const liked = (p.liked_users || []).includes(me?.id);
+            const mine = p.authorId === me?.id;
+            return `
+            <article class="card card-pad mb-4">
+                <div class="d-flex items-center gap-3 mb-4">
+                    ${avatarHtml({ ism: p.author }, 'avatar-sm')}
+                    <div class="grow" style="min-width:0">
+                        <div class="fw-8 truncate">${esc(p.author || 'Noma’lum')}</div>
+                        <div class="t-xs c-soft">${esc(p.date || '')}</div>
+                    </div>
+                    ${!p.approved ? '<span class="badge badge-amber">tasdiqlash kutilmoqda</span>' : ''}
+                </div>
+                ${p.title ? `<h3 class="mb-2" style="font-size:1.125rem">${esc(p.title)}</h3>` : ''}
+                <p class="prose" style="font-size:.9375rem">${esc(p.content)}</p>
+                ${p.image ? `<img src="${esc(p.image)}" alt="" class="rounded-lg mt-4" style="width:100%;max-height:320px;object-fit:cover" loading="lazy">` : ''}
+
+                <div class="d-flex items-center gap-2 mt-5 flex-wrap">
+                    <button class="btn ${liked ? 'btn-primary' : 'btn-outline'} btn-sm" onclick="window.__toggleLike(${p.id},this)">
+                        <i data-lucide="heart"${liked ? ' fill="currentColor"' : ''}></i> ${p.likes || 0}
+                    </button>
+                    <button class="btn btn-outline btn-sm" onclick="window.__openComments(${p.id})">
+                        <i data-lucide="message-square"></i> ${(p.comments || []).length}
+                    </button>
+                    <div class="grow"></div>
+                    ${canModerate && !p.approved ? `
+                    <button class="btn btn-success btn-sm" onclick="window.__apprPost(${p.id},true)"><i data-lucide="check"></i></button>
+                    <button class="btn btn-danger btn-sm" onclick="window.__apprPost(${p.id},false)"><i data-lucide="x"></i></button>` : ''}
+                    ${(mine || STATE.user.role === 'admin') ? `
+                    <button class="btn-icon sm" onclick="window.__delPost(${p.id})" aria-label="O’chirish" style="color:var(--red-500)">
+                        <i data-lucide="trash-2"></i>
+                    </button>` : ''}
+                </div>
+            </article>`;
+        }).join('');
+    });
+}
+
+window.__svPost = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    try {
+        await api_post('/posts', { title: f.get('title'), content: f.get('content') });
+        showToast('Post yaratildi', 'success');
+        e.target.reset();
+        loadPosts();
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+window.__apprPost = async (id, ok) => {
+    try { await api_patch(`/posts/${id}`, { approved: ok }); showToast(ok ? 'Post tasdiqlandi' : 'Post rad etildi', 'success'); loadPosts(); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__delPost = async (id) => {
+    if (!confirm('Postni o‘chirishni tasdiqlaysizmi?')) return;
+    try { await api_del(`/posts/${id}`); showToast('Post o‘chirildi', 'success'); loadPosts(); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__toggleLike = async (id, btn) => {
+    try {
+        const r = await api_post(`/posts/${id}/like`);
+        btn.classList.toggle('btn-primary', r.liked);
+        btn.classList.toggle('btn-outline', !r.liked);
+        btn.innerHTML = `<i data-lucide="heart"${r.liked ? ' fill="currentColor"' : ''}></i> ${r.likes}`;
+        safeLucide(btn);
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__openComments = async (id) => {
+    const posts = await getPosts();
+    const p = posts.find(x => x.id === id);
+    if (!p) return;
+
+    openModal(modalShell({
+        icon: '<i data-lucide="message-square"></i>',
+        title: esc(p.title || 'Izohlar'),
+        body: `
+            <div class="stack">
+                <div class="stack" id="comment-list">
+                    ${(p.comments || []).length === 0
+                        ? '<div class="form-hint">Izohlar yo‘q</div>'
+                        : p.comments.map(c => `
+                        <div class="list-row items-start" style="padding:10px 0">
+                            ${avatarHtml({ ism: c.user_name }, 'avatar-xs')}
+                            <div class="grow">
+                                <div class="t-xs fw-7">${esc(c.user_name || '')}</div>
+                                <div class="t-sm" style="white-space:pre-wrap">${esc(c.text)}</div>
+                            </div>
+                        </div>`).join('')}
+                </div>
+                <form class="d-flex gap-2" onsubmit="return window.__svComment(event, ${id})">
+                    <input class="input" id="comment-input" placeholder="Izoh yozing…" required>
+                    <button class="btn btn-primary" style="flex:none"><i data-lucide="send"></i></button>
+                </form>
+            </div>`,
+        footer: '<button class="btn btn-outline btn-block" onclick="cModal()">Yopish</button>',
+    }));
+};
+
+window.__svComment = async (e, id) => {
+    e.preventDefault();
+    const el = document.getElementById('comment-input');
+    const text = el?.value.trim();
+    if (!text) return false;
+    try {
+        await api_post(`/posts/${id}/comments`, { text });
+        el.value = '';
+        window.__openComments(id);
+        loadPosts();
+    } catch (err) { showToast(err.message, 'error'); }
+    return false;
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: profile
+// ══════════════════════════════════════════════════════════════════════
+// \u2500\u2500\u2500 Check-in kartasi (GPS orqali) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Eski versiya juda sodda edi: bitta tugma, xato bo'lsa umuman
+// tushuntirish yo'q, "qayta urinish" ham yo'q. Endi o'quvchi aniq
+// masofani, GPS aniqligini va radiusni ko'radi.
+const GEO_CACHE_KEY = 'oquv_last_geo';
+
+function geoCached() {
+    try { return JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || 'null'); }
+    catch (e) { return null; }
+}
+
+function checkinCard(done, info) {
+    if (done) {
+        const bonus = info && info.bonus;
+        return `
+        <section class="checkin-card done">
+            <div class="checkin-icon"><i data-lucide="check"></i></div>
+            <div class="grow">
+                <h3 class="t-lg fw-9">Bugun keldingiz! \uD83C\uDF89</h3>
+                <p class="c-muted t-sm mt-1">Davomatingiz <b>Keldi</b> deb belgilandi${bonus ? ` va +${bonus} XP olindi` : ''}.</p>
+            </div>
+            <span class="badge badge-green"><i data-lucide="user-check"></i> Keldi</span>
+        </section>`;
+    }
+    const c = geoCached() || {};
+    const hasGeo = !!c.dist || !!c.when;
+    return `
+    <section class="checkin-card" id="checkin-card">
+        <div class="checkin-icon" id="checkin-icon"><i data-lucide="map-pin"></i></div>
+        <div class="grow">
+            <h3 class="t-lg fw-9">Bugun keldingizmi?</h3>
+            <p class="c-muted t-sm mt-1">
+                Joylashuvni aniqlab, kolledj hududida ekaningizni tekshiramiz.
+                Telefonda avval <b>geolokatsiya ruxsatini</b> yoqing.
+            </p>
+
+            <div class="geo-readout" id="geo-readout" ${hasGeo ? '' : 'hidden'}>
+                <div class="geo-ring" id="geo-ring" style="--p:${Math.min(100, c.pct || 0)}">
+                    <span id="geo-ring-num">${Math.round(c.pct || 0)}%</span>
+                    <small>radius</small>
+                </div>
+                <div class="grow">
+                    <div class="geo-line"><i data-lucide="map-pin"></i>
+                        <span id="geo-dist">${Math.round(c.dist || 0)} m</span>
+                        <span class="c-muted" id="geo-radius-text">/ ${Math.round(c.radius || 0)} m radius</span>
+                    </div>
+                    <div class="geo-line"><i data-lucide="satellite"></i>
+                        <span>GPS aniqligi: <b id="geo-acc">${Math.round(c.acc || 0)} m</b></span>
+                    </div>
+                    <div class="geo-line"><i data-lucide="clock"></i>
+                        <span class="c-muted" id="geo-time">${esc(c.when || '')}</span>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="chat-messages bg-slate-50/50" id="staff-chat-messages-area">
-            ${msgs.map(m => {
-                const isMe = m.userId === STATE.user.id;
-                const rn = m.role === 'admin' ? 'Admin' : m.role === 'director' ? 'Direktor' : m.role === 'tech_admin' ? 'Tech Admin' : 'Ustoz';
-                const rc = m.role === 'admin' ? 'bg-red-100 text-red-600' : m.role === 'director' ? 'bg-purple-100 text-purple-600' : 'bg-indigo-100 text-indigo-600';
-                
-                return `
-                <div class="msg-wrapper ${isMe ? 'me' : 'other'} w-full" id="staff-msg-${m.id}">
-                    <div class="flex items-center gap-2 mb-1 w-full ${isMe ? 'justify-end' : ''}">
-                        <span class="msg-meta text-[10px] font-black uppercase text-slate-400">${isMe ? 'Siz' : m.userName}</span>
-                        ${!isMe ? `<span class="text-[9px] font-black uppercase ${rc} px-1.5 py-0.5 rounded-md">${rn}</span>` : ''}
-                    </div>
-                    <div class="msg-bubble relative group/inner flex ${isMe ? 'justify-end' : 'justify-start'}">
-                        ${(isMe || r === 'admin') ? `
-                            <button onclick="deleteStaffChatMessage(${m.id})" class="absolute -top-3 ${isMe ? '-left-3' : '-right-3'} md:top-1/2 md:-translate-y-1/2 md:${isMe ? '-left-10' : '-right-10'} opacity-100 md:opacity-0 md:group-hover/inner:opacity-100 transition-opacity p-2 bg-red-50 text-red-500 rounded-full hover:bg-red-100 shadow-sm active:scale-95 z-20">
-                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
-                        ` : ''}
-                        <div class="${isMe ? 'bg-indigo-600 text-white' : 'bg-white text-slate-800 border border-slate-100'} p-4 rounded-2xl shadow-sm max-w-[85%] font-medium">
-                            <p class="whitespace-pre-wrap">${m.text}</p>
-                            <div class="text-[9px] font-bold mt-2 ${isMe ? 'text-indigo-200 text-right' : 'text-slate-400 text-left'}">${m.time}</div>
+            <div class="d-flex gap-2 mt-4 flex-wrap">
+                <button class="btn btn-primary" id="checkin-btn" onclick="window.__checkIn()">
+                    <i data-lucide="navigation"></i> Kelishimni belgilash
+                </button>
+                <button class="btn btn-soft" id="checkin-retry" onclick="window.__checkIn(true)" hidden>
+                    <i data-lucide="refresh-cw"></i> Qayta
+                </button>
+                <button class="btn btn-ghost" id="checkin-manual" onclick="window.__manualCheckIn()">
+                    <i data-lucide="hand"></i> Qo\u2018lda
+                </button>
+            </div>
+            <div class="t-xs c-muted mt-2" id="checkin-hint">${hasGeo ? 'Oxirgi joylashuvni ko‘rsatilgan. Belgilash uchun tugmani bosing.' : ''}</div>
+        </div>
+    </section>`;
+}
+
+function geoSave(dist, radius, acc, pct) {
+    try {
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify({
+            dist: dist || 0, radius: radius || 0, acc: acc || 0,
+            pct: pct || 0,
+            when: new Date().toLocaleString('uz-UZ', { hour: '2-digit', minute: '2-digit' }) + ' da',
+        }));
+    } catch (e) { /* localStorage yopiq bo'lishi mumkin */ }
+}
+
+window.__checkIn = async (retry) => {
+    const btn = document.getElementById('checkin-btn');
+    const retryBtn = document.getElementById('checkin-retry');
+    const hint = document.getElementById('checkin-hint');
+    const say = (t) => { if (hint) hint.textContent = t || ''; };
+    const busy = (on) => {
+        if (!btn) return;
+        btn.disabled = on;
+        btn.innerHTML = on
+            ? '<span class="spinner" style="width:15px;height:15px"></span> Aniqlanmoqda\u2026'
+            : '<i data-lucide="navigation"></i> Kelishimni belgilash';
+        safeLucide(btn);
+        if (retryBtn) retryBtn.disabled = on;
+    };
+
+    if (!navigator.geolocation) {
+        say('Bu brauzer geolokatsiyani qo\u2018llamaydi.');
+        showToast('Geolokatsiya mavjud emas \u2014 qo\u2018lda belgilash mumkin', 'warn');
+        if (btn) btn.hidden = true;
+        return;
+    }
+    busy(true);
+    say('Ruxsat so\u2018ralmoqda\u2026');
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        const acc = pos.coords.accuracy || 0;
+        try {
+            const res = await api_post('/attendance/checkin', {
+                lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc,
+            });
+            const pct = res.radius ? Math.min(100, (res.distance / res.radius) * 100) : 0;
+            geoSave(res.distance, res.radius, acc, pct);
+            __geoPaint(res, acc);
+
+            if (res.checkedIn) {
+                showToast(res.message || 'Keldingiz! Davomat qo\u2018shildi', 'success');
+                if (res.points) { STATE.user.points = res.points; localStorage.setItem('lms_user', JSON.stringify(STATE.user)); updateHeaderUser(); }
+                renderView('profile');
+            } else {
+                say(res.message || 'Kolledj hududida emasiniz');
+                showToast(res.message || 'Kolledj hududida emasiniz', 'warn');
+                busy(false);
+                if (retryBtn) retryBtn.hidden = false;
+                if (acc > 300) {
+                    say(`${res.message || ''} Aniqlik past (\u00b1${Math.round(acc)} m) \u2014 qayta urinib ko\u2018ring yoki qo\u2018lda belgilang.`.trim());
+                }
+            }
+        } catch (e) {
+            say(e.message);
+            showToast(e.message, 'error');
+            busy(false);
+            if (retryBtn) retryBtn.hidden = false;
+        }
+    }, (err) => {
+        const msg = err.code === 1
+            ? 'Ruxsat rad etildi. Brauzer sozlamasida geolokatsiyani yo\u2018qing \u2014 brauzer nomi yonidash quyida belgi.'
+            : (err.code === 3 ? 'Geolokatsiya vaqti o\u2018tdi. Signal yo\u2018q bo\u2018lishi mumkin.'
+                               : 'Joylashuvni aniqlab bo\u2018lmadi. GPS yo\u2018qiqmi?');
+        say(msg);
+        showToast(msg, 'warn');
+        busy(false);
+        if (retryBtn) retryBtn.hidden = false;
+        if (retryBtn) retryBtn.click();
+    }, {
+        // Kesh: 30 sekund ichida GPS o\u2018zgarishi kam. Eski cache (60 s)
+        // "qayta urinib ko\u2018ring" tugmasini ma'nosiz qilardi.
+        enableHighAccuracy: true, timeout: 20000, maximumAge: 30000,
+    });
+};
+
+function __geoPaint(res, acc) {
+    const box = document.getElementById('geo-readout');
+    if (box) box.hidden = false;
+    const pct = res.radius ? Math.min(100, (res.distance / res.radius) * 100) : 0;
+    const ring = document.getElementById('geo-ring');
+    if (ring) {
+        ring.style.setProperty('--p', pct.toFixed(0));
+        ring.classList.toggle('over', !res.inside);
+    }
+    const num = document.getElementById('geo-ring-num');
+    if (num) num.textContent = Math.round(pct) + '%';
+    const d = document.getElementById('geo-dist');
+    if (d) d.textContent = res.distance != null ? `${res.distance} m` : 'noma\u2018lum';
+    const rt = document.getElementById('geo-radius-text');
+    if (rt) rt.textContent = res.radius ? `/ ${res.radius} m radius` : '';
+    const a = document.getElementById('geo-acc');
+    if (a) a.textContent = acc ? `\u00b1${Math.round(acc)} m` : 'noma\u2018lum';
+    const icon = document.getElementById('checkin-icon');
+    if (icon) icon.innerHTML = res.inside
+        ? '<i data-lucide="map-pin-check"></i>' : '<i data-lucide="map-pin-off"></i>';
+    safeLucide(icon);
+}
+
+window.__manualCheckIn = () => {
+    openModal(modalShell({
+        title: 'Qo\u2018lda belgilash',
+        icon: 'hand',
+        body: `
+            <p class="c-muted t-sm" style="margin:0 0 14px">
+                Agar GPS ishlamasa (kompyuterda, yopiq binoda yoki eski telefonda),
+                sababni yozib qo\u2018lda belgilashingiz mumkin. Sabab o\u2018qituvchingizga
+                ko\u2018rinadi \u2014 so\u2018z qilmasdan yozmay qo\u2018yishingiz tavsiya etilmaydi.
+            </p>
+            <form id="manual-checkin-form" class="field">
+                <label class="label">Sabab</label>
+                <input class="input" name="reason" required minlength="4" maxlength="180"
+                       placeholder="Masalan: Wi-Fi routeri interneti yo\u2018q, GPS signal yo\u2018q">
+                <div class="form-hint mt-1">Kamida 4 ta belgi.</div>
+            </form>`,
+        footer: `
+            <button class="btn btn-ghost" onclick="cModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="window.__saveManualCheckIn()">
+                <i data-lucide="check"></i> Belgilash
+            </button>`,
+    }));
+    setTimeout(() => {
+        const i = document.querySelector('#manual-checkin-form input[name="reason"]');
+        if (i) i.focus();
+    }, 60);
+};
+
+window.__saveManualCheckIn = async () => {
+    const form = document.getElementById('manual-checkin-form');
+    const reason = (form?.querySelector('input[name="reason"]')?.value || '').trim();
+    if (reason.length < 4) { showToast('Sababni yozib bering (kamida 4 ta belgi)', 'error'); return; }
+    try {
+        const res = await api_post('/attendance/checkin', { manual: true, reason });
+        cModal();
+        showToast(res.message || 'Qo\u2018lda belgilandi', 'success');
+        if (res.points) { STATE.user.points = res.points; localStorage.setItem('lms_user', JSON.stringify(STATE.user)); updateHeaderUser(); }
+        renderView('profile');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+async function v_profile() {
+    const u = STATE.user;
+    const s = userStats(u);
+    // Telegram holati (deep-link kodi) kartaga kirishidan oldin yuklanadi.
+    const [achs, courses, myAtt] = await Promise.all([
+        getAchievements(), getCourses().catch(() => []), getMyAttendance().catch(() => []),
+        window.__loadTgInfo(),
+    ]);
+    const unlocked = u.achievements || [];
+    // Bugungi kunlik belgi: o'quvchi allaqachon kelganmi?
+    const today = new Date().toISOString().slice(0, 10);
+    const checkedIn = (myAtt || []).some(a => a.date === today || a.date?.startsWith(today));
+    const isStudent = u.role === 'student';
+
+    return `
+        ${pageHead('Profil', 'Akkauntingizni boshqaring')}
+
+        ${isStudent ? checkinCard(checkedIn, myAtt && myAtt[today]) : ''}
+
+        <div class="split split-2">
+            <div class="stack">
+                <section class="card card-pad-lg">
+                    <div class="d-flex items-center gap-4 flex-wrap">
+                        ${avatarHtml(u, 'avatar-xl')}
+                        <div class="grow" style="min-width:0">
+                            <h2 class="t-xl fw-9">${esc(u.ism)}</h2>
+                            <div class="d-flex items-center gap-2 mt-2 flex-wrap">
+                                <span class="badge ${ROLE_BADGE[u.role] || ''}">${roleLabel(u.role)}</span>
+                                <span class="badge badge-orange"><i data-lucide="zap"></i> ${num(u.points)} XP</span>
+                            </div>
+                            <div class="t-sm c-muted mt-2">${esc(u.email)}</div>
                         </div>
                     </div>
-                </div>`;
-            }).join('')}
-            ${msgs.length === 0 ? "<div class=\"text-center py-20 text-slate-400 font-bold\">Xabarlar yo'q. Jamoaga salom yo'llang!</div>" : ''}
-        </div>
+                </section>
 
-        <div class="p-4 border-t border-slate-100 relative bg-white">
-            <form onsubmit="sendStaffChatMessage(event)" class="flex gap-3 items-center">
-                <div class="flex-1 relative">
-                    <input id="staff-chat-input" autocomplete="off" placeholder="Xabar yozing (Faqat raxbarlar va ustozlar ko'radi)..." class="w-full bg-slate-50 border-none px-6 py-4 rounded-2xl font-semibold outline-none focus:ring-2 ring-indigo-200 transition-all">
-                </div>
-                <button class="p-4 bg-indigo-600 text-white rounded-2xl shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 active:scale-95 transition-all">
-                    <i data-lucide="send" class="w-6 h-6"></i>
+                ${sectionCard('Ma’lumotlarni tahrirlash', `
+                    <form class="stack" onsubmit="return window.__svProfile(event)">
+                        <div class="field">
+                            <label class="label">Ism va familiya</label>
+                            <input class="input" name="full_name" value="${esc(u.ism)}" required>
+                        </div>
+                        <div class="field">
+                            <label class="label">Avatar</label>
+                            <input type="file" accept="image/*" class="input" style="padding:8px"
+                                   onchange="window.__uploadAvatar(this)">
+                            <div class="form-hint mt-1">Rasm tanlang — serverga yuklanadi.</div>
+                        </div>
+                        <div class="field">
+                            <label class="label">Yangi parol</label>
+                            <input type="password" class="input" name="password" placeholder="O‘zgartirmaslik uchun bo‘sh qoldiring">
+                        </div>
+                        <button class="btn btn-primary"><i data-lucide="save"></i> Saqlash</button>
+                    </form>`, { icon: '<i data-lucide="user-cog"></i>' })}
+
+${telegramCard(u)}
+            </div>
+
+            <div class="stack">
+                ${sectionCard('Statistika', `
+                    <div class="stack-sm">
+                        ${[
+                            ['Ballar', num(u.points), 'zap'],
+                            ['Yakunlangan dars', s.lessonsDone, 'book-open-check'],
+                            ['O‘yin ballari', s.duelWins, 'gamepad-2'],
+                            ['Yutuqlar', `${unlocked.length}/${achs.length}`, 'award'],
+                        ].map(([l, v, ic]) => `
+                        <div class="list-row" style="padding:10px 0">
+                            <div class="card-icon" style="width:32px;height:32px"><i data-lucide="${ic}"></i></div>
+                            <div class="grow"><div class="t-sm fw-7">${l}</div></div>
+                            <span class="fw-9">${v}</span>
+                        </div>`).join('')}
+                    </div>`, { icon: '<i data-lucide="chart-no-axes-column"></i>' })}
+
+                ${sectionCard('Yutuqlar', `
+                    <div class="grid grid-2" style="gap:10px">
+                        ${achs.map(a => {
+                            const got = unlocked.includes(a.id);
+                            return `
+                            <div class="card card-pad-sm ${got ? RARITY_META[a.rarity]?.cls || '' : ''}" style="${got ? '' : 'opacity:.5;filter:grayscale(1)'}">
+                                <div class="d-flex items-center gap-2">
+                                    <div style="font-size:1.5rem">${esc(a.icon || '🏆')}</div>
+                                    <div style="min-width:0">
+                                        <div class="t-xs fw-8 truncate">${esc(a.title)}</div>
+                                        <div class="t-xs c-soft">${got ? 'Ochilgan' : 'Yopiq'}</div>
+                                    </div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>`, { icon: '<i data-lucide="award"></i>' })}
+
+                <button class="btn btn-danger btn-block" onclick="if(confirm('Chiqishni tasdiqlaysizmi?'))logout()">
+                    <i data-lucide="log-out"></i> Chiqish
                 </button>
-            </form>
-        </div>
-    </div>`;
-};
+            </div>
+        </div>`;
+}
 
-window.sendStaffChatMessage = (e) => {
+window.__svProfile = async (e) => {
     e.preventDefault();
-    const input = document.getElementById('staff-chat-input');
-    const text = input.value.trim();
-    if (!text) return;
+    const f = new FormData(e.target);
+    const payload = { full_name: f.get('full_name') };
+    if (f.get('password')) payload.password = f.get('password');
+    try {
+        const updated = await api_patch(`/users/${STATE.user.id}`, payload);
+        STATE.user = updated;
+        localStorage.setItem('lms_user', JSON.stringify(updated));
+        updateHeaderUser();
+        showToast('Profil saqlandi', 'success');
+        renderView('profile');
+    } catch (e) { showToast(e.message, 'error'); }
+    return false;
+};
 
-    let db = getDB();
-    db.staffChatMessages = db.staffChatMessages || [];
-    
-    const now = new Date();
-    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-    
-    db.staffChatMessages.push({
-        id: Date.now(),
-        userId: STATE.user.id,
-        userName: STATE.user.ism,
-        role: STATE.user.role,
-        text: text,
-        time: time
+window.__uploadAvatar = async (input) => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { showToast('Rasm 2 MB dan kichik bo‘lishi kerak', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+        try {
+            const updated = await api_patch(`/users/${STATE.user.id}`, { avatar: reader.result });
+            STATE.user = updated;
+            localStorage.setItem('lms_user', JSON.stringify(updated));
+            updateHeaderUser();
+            showToast('Avatar yangilandi', 'success');
+            renderView('profile');
+        } catch (e) { showToast(e.message, 'error'); }
+    };
+    reader.readAsDataURL(file);
+};
+
+// \u2500\u2500\u2500 Telegram kartasi (profil) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Eski usul \u2014 chat ID\u2019ni qo\u2018lda kiritish \u2014 real foydalanuvchilar
+// hech qachon ishlatmagan. Endi bot havolasi orqali bir tugma bosiladi.
+let _tgInfo = null;
+
+function telegramCard(u) {
+    const info = _tgInfo || {};
+    const linked = !!info.linked || !!u.telegramChatId;
+    const noBot = info.tokenSet === false && !info.botUsername;
+    return sectionCard('Telegram', `
+        <div class="stack-sm">
+            <div class="d-flex items-center gap-3">
+                <div class="card-icon" style="background:#e8f4fd;color:#1f8fc4"><i data-lucide="send"></i></div>
+                <div class="grow">
+                    <div class="fw-8 t-base">${linked ? 'Bog\u2018langan' : 'Bog\u2018lanmagan'}</div>
+                    <div class="t-xs c-muted">${linked
+                        ? (info.chatId ? 'Chat ID: ' + esc(info.chatId) : 'Bildirishnomalar Telegram orqali keladi')
+                        : (noBot ? 'Bot hali sozlanmagan \u2014 administratorga murojaat qiling'
+                                  : 'Baholar, davomat va xabarlar shu yerda keladi')}</div>
+                </div>
+                ${linked ? '<span class="badge badge-green"><i data-lucide="check"></i> Faol</span>' : ''}
+            </div>
+
+            ${!linked && info.botUsername ? `
+                <div class="tg-steps">
+                    <div class="tg-step"><span>1</span>
+                        <a class="btn btn-primary grow" href="${esc(info.botLink)}" target="_blank" rel="noopener">
+                            <i data-lucide="external-link"></i> @${esc(info.botUsername)} ni ochish
+                        </a></div>
+                    <div class="tg-step"><span>2</span>
+                        <div class="grow">
+                            <code class="tg-code">/start ${esc(info.code)}</code>
+                            <div class="form-hint">Botga yuboring \u2014 u sizni avtomatik bog\u2018laydi.</div>
+                        </div>
+                        <button class="btn btn-soft" onclick="window.__copyTgCode()"><i data-lucide="copy"></i></button>
+                    </div>
+                </div>` : ''}
+
+            <details class="tg-manual">
+                <summary class="t-xs c-muted"><i data-lucide="chevron-down"></i> Chat ID\u2018ni qo\u2018lda kiritish</summary>
+                <div class="d-flex gap-2 mt-2">
+                    <input class="input grow" id="tg-chat" inputmode="numeric" placeholder="Telegram chat ID">
+                    <button class="btn btn-soft" onclick="window.__bindTelegram()"><i data-lucide="link"></i></button>
+                </div>
+            </details>
+
+            ${linked ? '<button class="btn btn-ghost btn-sm" onclick="window.__unbindTelegram()"><i data-lucide="unlink"></i> Uzib qo\u2018yish</button>' : ''}
+        </div>`, { icon: '<i data-lucide="send"></i>' });
+}
+
+window.__loadTgInfo = async () => {
+    try { _tgInfo = await api_get('/telegram/link-info'); } catch (e) { _tgInfo = { linked: false }; }
+};
+
+window.__copyTgCode = async () => {
+    const code = _tgInfo?.code || '';
+    if (!code) return;
+    try {
+        await navigator.clipboard.writeText('/start ' + code);
+        showToast('Kod nusxalandi', 'success');
+    } catch (e) { showToast('Nusxalashda xato: ' + e.message, 'error'); }
+};
+
+window.__bindTelegram = async () => {
+    const val = document.getElementById('tg-chat')?.value.trim();
+    if (!val) { showToast('Chat ID kiriting', 'error'); return; }
+    try { await api_post('/telegram/bind', { chatId: val }); showToast('Telegram bog\u2018landi', 'success'); renderView('profile'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__unbindTelegram = async () => {
+    try { await api_post('/telegram/unbind', {}); showToast('Telegram uzildi', 'success'); renderView('profile'); }
+    catch (e) { showToast(e.message, 'error'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: notifications
+// ══════════════════════════════════════════════════════════════════════
+async function v_notifications() {
+    const notifs = await getNotifications();
+    return `
+        ${pageHead('Bildirishnomalar', notifs.length === 0 ? 'Xabarlar yo‘q' : `${notifs.filter(n => !n.seen).length} ta yangi`, notifs.length
+            ? `<button class="btn btn-outline" onclick="window.__markNotifsRead()"><i data-lucide="check-check"></i> O‘qilgan deb belgilash</button>` : '')}
+        ${notifs.length === 0
+            ? emptyState('bell-off', 'Hali bildirishnoma yo‘q', 'Baholar, davomat va xabarlar shu yerda ko‘rinadi.')
+            : `<div class="stack-sm">
+                ${notifs.map(n => `
+                <div class="card card-pad-sm" style="${n.seen ? '' : 'border-color:var(--blue-200);background:var(--blue-50)'}">
+                    <div class="d-flex items-start gap-3">
+                        <div class="card-icon ${n.type === 'warning' ? 'red' : n.type === 'success' ? 'green' : ''}" style="width:36px;height:36px">
+                            <i data-lucide="${n.type === 'warning' ? 'triangle-alert' : n.type === 'success' ? 'check' : 'info'}"></i>
+                        </div>
+                        <div class="grow">
+                            <div class="t-sm fw-6" style="line-height:1.5">${esc(n.msg)}</div>
+                            <div class="t-xs c-soft mt-1">${esc(n.date || '')}</div>
+                        </div>
+                        ${!n.seen ? '<span class="badge badge-blue">yangi</span>' : ''}
+                    </div>
+                </div>`).join('')}
+            </div>`}`;
+}
+
+window.__markNotifsRead = async () => {
+    try {
+        await api_post('/notifications/read');
+        STATE.notifCount = 0;
+        updateNotifBadges();
+        showToast('Barchasi o‘qilgan deb belgilandi', 'success');
+        renderView('notifications');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Views: settings
+// ══════════════════════════════════════════════════════════════════════
+async function v_settings() {
+    const s = await getSettingsAPI();
+    const canToken = ['admin', 'tech_admin'].includes(STATE.user.role);
+    return `
+        ${pageHead('Sozlamalar', 'Platforma sozlamalari')}
+
+        <div class="split split-half">
+            ${sectionCard('Umumiy', `
+                <div class="stack">
+                    <div class="field">
+                        <label class="label">Platforma nomi</label>
+                        <input class="input" id="set-name" value="${esc(s.platformName || "O’quv.uz")}">
+                    </div>
+                    <div class="d-flex items-center justify-between list-soft">
+                        <div>
+                            <div class="fw-8 t-base">Ro‘yxatdan o‘tish</div>
+                            <div class="t-xs c-muted">Yangi foydalanuvchilar qo‘shilishi</div>
+                        </div>
+                        <button class="switch ${s.allowRegistration ? 'on' : ''}" id="set-reg"
+                                onclick="this.classList.toggle('on')"></button>
+                    </div>
+                    <button class="btn btn-primary" onclick="window.__saveSettings()">
+                        <i data-lucide="save"></i> Saqlash
+                    </button>
+                </div>`, { icon: '<i data-lucide="settings"></i>' })}
+
+            ${sectionCard('Geolokatsiya', `
+                <div class="stack">
+                    <div class="field">
+                        <label class="label">Kolledj kengligi (latitude)</label>
+                        <input class="input" id="set-lat" value="${esc(s.collegeLat || '')}" placeholder="41.311081">
+                    </div>
+                    <div class="field">
+                        <label class="label">Kolledj uzunligi (longitude)</label>
+                        <input class="input" id="set-lng" value="${esc(s.collegeLng || '')}" placeholder="69.240562">
+                    </div>
+                    <div class="field">
+                        <label class="label">Ruxsat etilgan radius (metr)</label>
+                        <input class="input" id="set-radius" type="number" value="${num(s.attendanceRadius) || 200}">
+                    </div>
+                    <button class="btn btn-save" onclick="window.__saveGeo()">
+                        <i data-lucide="map-pin"></i> Geolokatsiyani saqlash
+                    </button>
+                </div>`, { icon: '<i data-lucide="map-pin"></i>' })}
+
+            ${canToken ? sectionCard('Telegram bot', `
+                <div class="stack">
+                    <div class="field">
+                        <label class="label">Bot token</label>
+                        <input class="input" id="set-token" value="${esc(s.telegramBotToken || '')}" placeholder="123456:ABC-DEF…">
+                        <div class="form-hint mt-1">Token faqat adminlar uchun ko‘rinadi.</div>
+                    </div>
+                    <div class="field">
+                        <label class="label">Bot username</label>
+                        <input class="input" id="set-tg-user" value="${esc(s.telegramBotUsername || '')}" placeholder="OquvUzBot">
+                        <div class="form-hint mt-1">@BotFather bergan nom. Foydalanuvchilar shu havolani ochadi.</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary" onclick="window.__saveToken()"><i data-lucide="save"></i> Saqlash</button>
+                        <button class="btn btn-soft" onclick="window.__testToken()"><i data-lucide="plug-zap"></i> Tekshirish</button>
+                    </div>
+                    <div class="t-xs c-muted" id="tg-test-out"></div>
+                </div>`, { icon: '<i data-lucide="send"></i>', sub: 'Bot token @BotFather dan olinadi' }) : ''}
+        </div>`;
+}
+
+window.__saveSettings = async () => {
+    try {
+        const saved = await api_patch('/settings', {
+            platformName: document.getElementById('set-name').value,
+            allowRegistration: document.getElementById('set-reg').classList.contains('on'),
+        });
+        // Server javobiga ishonamiz — bu holatda ro'yxat ekrani ham darhol
+        // to'g'ri ishlaydi, qayta yuklashsiz.
+        applyRegistrationGate(saved);
+        syncLandingData().catch(() => {});
+        showToast('Sozlamalar saqlandi', 'success');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__saveGeo = async () => {
+    try {
+        await api_patch('/settings', {
+            collegeLat: document.getElementById('set-lat').value,
+            collegeLng: document.getElementById('set-lng').value,
+            attendanceRadius: Number(document.getElementById('set-radius').value),
+        });
+        showToast('Geolokatsiya saqlandi', 'success');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__saveToken = async () => {
+    try {
+        await api_patch('/settings', {
+            telegramBotToken: document.getElementById('set-token').value,
+            telegramBotUsername: document.getElementById('set-tg-user')?.value || '',
+        });
+        showToast('Telegram sozlamalari saqlandi', 'success');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.__testToken = async () => {
+    const out = document.getElementById('tg-test-out');
+    if (out) out.innerHTML = '<span class="spinner" style="width:13px;height:13px"></span> Tekshirilmoqda…';
+    try {
+        await api_patch('/settings', {
+            telegramBotToken: document.getElementById('set-token').value,
+            telegramBotUsername: document.getElementById('set-tg-user')?.value || '',
+        });
+        const res = await api_post('/telegram/test', { chatId: document.getElementById('tg-test-chat')?.value || '' });
+        if (out) out.innerHTML = `<span style="color:var(--green-600)">✓ ${esc(res.message)}</span>`;
+        showToast(res.message, 'success');
+    } catch (e) {
+        if (out) out.innerHTML = `<span style="color:var(--red-600)">✗ ${esc(e.message)}</span>`;
+        showToast(e.message, 'error');
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Mobil: yuqoriga qaytish tugmasi
+//  Telefonda quyi manyu baland bo'lgani uchun bosh sahifa qaytish
+//  qiyin edi. Tugma faqat 400 px dan yuqoriga scroll qilganda paydo bo'ladi.
+// ══════════════════════════════════════════════════════════════════════
+function initScrollTop() {
+    if (document.getElementById('scroll-top-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'scroll-top-btn';
+    btn.className = 'scroll-top-btn';
+    btn.type = 'button';
+    btn.setAttribute('aria-label', 'Yuqoriga');
+    btn.innerHTML = '<i data-lucide="arrow-up"></i>';
+    btn.onclick = () => {
+        const body = document.querySelector('.app-body') || window;
+        if (body === window) window.scrollTo({ top: 0, behavior: 'smooth' });
+        else body.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    document.body.appendChild(btn);
+    safeLucide(btn);
+
+    const target = document.querySelector('.app-body') || window;
+    const onScroll = () => {
+        const y = target === window ? window.scrollY : target.scrollTop;
+        btn.classList.toggle('on', y > 420);
+    };
+    target.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Route table
+// ══════════════════════════════════════════════════════════════════════
+const VIEWS = {
+    'student-dashboard': d_student,
+    'ustoz-dashboard': d_ustoz,
+    'admin-dashboard': d_admin,
+    'director-dashboard': d_director,
+    'parent-dashboard': d_parent,
+    courses: v_courses,
+    'course-detail': v_cdetail,
+    users: v_users,
+    groups: v_groups,
+    attendance: () => (isStaff() ? v_attendance() : v_student_attendance()),
+    grades: v_grades,
+    reports: v_reports,
+    analytics: v_analytics,
+    leaderboard: v_lead,
+    support: v_support,
+    chat: v_chat,
+    'staff-chat': v_staff_chat,
+    library: v_library,
+    shop: v_shop,
+    pending: v_pending,
+    game: v_game,
+    questions: v_questions,
+    schedule: v_schedule,
+    posts: v_posts,
+    profile: v_profile,
+    notifications: v_notifications,
+    settings: v_settings,
+};
+
+// ══════════════════════════════════════════════════════════════════════
+//  Onboarding
+// ══════════════════════════════════════════════════════════════════════
+let INTRO_SLIDE = 0;
+
+function checkOnboarding() {
+    if (localStorage.getItem('lms_intro_seen')) return;
+    const el = document.getElementById('intro-modal');
+    if (el) { el.classList.remove('hidden'); INTRO_SLIDE = 0; }
+}
+
+function closeIntro() {
+    localStorage.setItem('lms_intro_seen', '1');
+    document.getElementById('intro-modal')?.classList.add('hidden');
+}
+
+function introShow(n) {
+    INTRO_SLIDE = n;
+    document.querySelectorAll('#intro-modal .intro-slide').forEach((s, i) => s.classList.toggle('active', i === n));
+    document.querySelectorAll('#intro-dots .slide-dot').forEach((d, i) => d.classList.toggle('active', i === n));
+    const btn = document.getElementById('btn-next-intro');
+    if (btn) btn.innerHTML = n >= 2 ? 'Boshlash <i data-lucide="rocket"></i>' : 'Keyingisi <i data-lucide="arrow-right"></i>';
+    safeLucide(btn);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Wiring
+// ══════════════════════════════════════════════════════════════════════
+function setupInteractions() {
+    document.addEventListener('click', (e) => {
+        const link = e.target.closest('[data-link]');
+        if (link) {
+            e.preventDefault();
+            window.location.hash = link.getAttribute('data-link');
+        }
+        if (e.target.closest('#sidebar-close')) toggleSidebar(false);
+        if (e.target.closest('#mobile-menu-btn')) toggleSidebar();
+        if (e.target.closest('#mobile-notif-btn')) window.location.hash = 'notifications';
     });
-    
-    saveDB(db);
-    input.value = '';
-    renderView('staff-chat');
-};
 
-window.deleteStaffChatMessage = (id) => {
-    if (!confirm("Haqiqatdan ham ushbu xabarni o'chirmoqchimisiz?")) return;
-    let db = getDB();
-    db.staffChatMessages = (db.staffChatMessages || []).filter(m => m.id !== id);
-    saveDB(db);
-    renderView('staff-chat');
-};
+    window.addEventListener('hashchange', handleRoute);
+
+    // Esc closes modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !document.getElementById('modal-root')?.classList.contains('hidden')) cModal();
+    });
+
+    // ── Login form ──
+    const logForm = document.getElementById('form-login');
+    if (logForm) {
+        logForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const errBox = document.getElementById('login-error-card');
+            const btn = logForm.querySelector('button[type="submit"]');
+            const email = document.getElementById('log-email')?.value.trim();
+            const pass = document.getElementById('log-pass')?.value || '';
+            errBox?.classList.add('hidden');
+
+            if (!email || !pass) {
+                errBox?.classList.remove('hidden');
+                return;
+            }
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner" style="width:18px;height:18px;border-width:2px"></span> Kirilmoqda…';
+            }
+            try {
+                const user = await login(email, pass);
+                STATE.user = user;
+                localStorage.setItem('lms_user', JSON.stringify(user));
+                logForm.reset();
+                window.location.hash = DASHBOARD_VIEW[user.role] || 'student-dashboard';
+            } catch (err) {
+                // pending / rejected hisoblar 403 qaytaradi — maxsus ko'rsatamiz
+                if (err.status === 403) {
+                    const box = document.getElementById('login-pending-card');
+                    box?.classList.remove('hidden');
+                    const txt = document.getElementById('login-pending-msg');
+                    if (txt) txt.textContent = err.message || 'Hisobingiz hali tasdiqlanmagan.';
+                } else {
+                    errBox?.classList.remove('hidden');
+                    const span = errBox?.querySelector('span');
+                    if (span) span.textContent = err.message || 'Email yoki parol xato!';
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Tizimga kirish';
+                }
+            }
+        };
+    }
+
+    // Register form
+    const regForm = document.getElementById('form-register');
+    if (regForm) {
+        regForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const errBox = document.getElementById('reg-error-card');
+            const errMsg = document.getElementById('reg-error-msg');
+            try {
+                const name = document.getElementById('reg-name').value.trim();
+                const email = document.getElementById('reg-email').value.trim();
+                const pass = document.getElementById('reg-pass').value.trim();
+                const groupId = document.getElementById('reg-group')?.value || null;
+
+                if (!name || !email) throw new Error('Ism va email to‘ldirilishi shart');
+                if (pass.length < 6) throw new Error('Parol kamida 6 belgi bo‘lishi kerak');
+
+                const user = await register(name, email, pass, groupId);
+                STATE.user = user;
+                if (user?.status === 'pending' || user?.status === 'rejected') {
+                    const box = document.getElementById('reg-pending-card');
+                    box?.classList.remove('hidden');
+                    regForm.reset();
+                    window.setTimeout(() => { window.location.hash = 'login'; }, 2600);
+                    return;
+                }
+                window.location.hash = DASHBOARD_VIEW[user.role] || 'student-dashboard';
+                regForm.reset();
+            } catch (err) {
+                errBox?.classList.remove('hidden');
+                if (errMsg) errMsg.textContent = err.message;
+            }
+        };
+    }
+
+    // Onboarding buttons
+    document.getElementById('btn-next-intro')?.addEventListener('click', () => {
+        if (INTRO_SLIDE >= 2) closeIntro();
+        else introShow(INTRO_SLIDE + 1);
+    });
+    document.getElementById('btn-skip-intro')?.addEventListener('click', closeIntro);
+
+    // Poll notifications
+    setInterval(refreshNotifications, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshNotifications(); });
+
+    // Pause lesson timer when the tab is hidden so students don’t lose time
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) updateLessonTimerUI();
+    });
+}
+
+async function renderRegisterGroups() {
+    const box = document.getElementById('reg-group-container');
+    if (!box) return;
+    try {
+        // `/groups` autentifikatsiya talab qiladi, ro'yxatdan o'tayotgan
+        // foydalanuvchi esa hali kirmagan — shuning uchun ochiq endpoint.
+        const groups = await api_get('/public/groups');
+        if (!groups.length) { box.innerHTML = ''; return; }
+        box.innerHTML = `
+            <label class="label" for="reg-group">Guruh</label>
+            <div class="input-icon">
+                <i data-lucide="users-round"></i>
+                <select class="select" id="reg-group">
+                    <option value="">Guruhsiz</option>
+                    ${groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}
+                </select>
+            </div>
+            <div class="form-hint mt-1">Noto‘g‘ri guruh tanlansa keyinchalik tuzatiladi.</div>`;
+        safeLucide(box);
+    } catch (e) { box.innerHTML = ''; }
+}
+
+/**
+ * Admin ro'yxatdan o'tishni yopgan bo'lsa, "Yaratish" havolasi va
+ * shakl ko'rsatilmaydi — aks holda foydalanuvchi 403 olib, nima
+ * qilishini bilmay qolardi.
+ */
+function applyRegistrationGate(settings) {
+    STATE.allowRegistration = !settings || settings.allowRegistration !== false;
+    const open = STATE.allowRegistration;
+    const link = document.getElementById('link-register');
+    const note = document.getElementById('register-closed-note');
+    if (link) {
+        link.classList.toggle('hidden', !open);
+        if (open) link.removeAttribute('aria-disabled');
+        else link.setAttribute('aria-disabled', 'true');
+    }
+    note?.classList.toggle('hidden', open);
+    const card = document.getElementById('reg-closed-card');
+    if (card) card.classList.toggle('hidden', open);
+    const submit = document.querySelector('#form-register button[type=submit]');
+    if (submit) submit.disabled = !open;   // `.btn:disabled` allaqachon stil beradi
+}
+
+function hideSplash() {
+    const s = document.getElementById('splash-screen');
+    if (!s) return;
+    s.classList.add('is-hidden');
+    setTimeout(() => s.remove(), 600);
+}
+
+async function boot() {
+    setupInteractions();
+    safeLucide(document);
+
+    await loadUserData();
+    await Promise.all([
+        syncLandingData().catch(() => {}),
+        // Sozlamalar ochiq endpoint — token kirganda ham, kirmaganda ham
+        // kerak (ro'yxatdan o'tish oynasi kirish huquqiga ega emas).
+        api_get('/settings').then(applyRegistrationGate).catch(() => {}),
+    ]);
+
+    if (!window.location.hash) {
+        window.location.hash = STATE.user ? DASHBOARD_VIEW[STATE.user.role] : 'home';
+    }
+    await handleRoute();
+
+    if (STATE.user) {
+        refreshNotifications();
+        checkOnboarding();
+    }
+    hideSplash();
+}
+
+// Hide splash once lucide is ready (icons inside it)
+document.addEventListener('DOMContentLoaded', () => {
+    const iv = setInterval(() => { if (window.lucide) { clearInterval(iv); safeLucide(document); } }, 50);
+    setTimeout(() => { clearInterval(iv); safeLucide(document); }, 1200);
+    initScrollTop();
+});
+
+boot();
